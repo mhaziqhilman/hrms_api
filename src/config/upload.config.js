@@ -1,6 +1,5 @@
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
 
 // File size limit (10MB)
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -63,88 +62,54 @@ const generateFilename = (originalname) => {
   return `${timestamp}_${nameWithoutExt}${ext}`;
 };
 
-// Get storage path based on category
+// Get Supabase storage path based on category (returns path string, not filesystem path)
 const getStoragePath = (category, metadata = {}) => {
-  const baseDir = path.join(__dirname, '../../uploads');
-
   switch (category) {
     case 'employee_document':
       if (metadata.employee_id) {
-        return path.join(baseDir, 'employees', String(metadata.employee_id), metadata.sub_category || 'documents');
+        return `employees/${metadata.employee_id}/${metadata.sub_category || 'documents'}`;
       }
-      return path.join(baseDir, 'employees', 'temp');
+      return 'employees/temp';
 
     case 'claim_receipt':
       if (metadata.claim_id) {
         const now = new Date();
         const year = now.getFullYear();
         const month = String(now.getMonth() + 1).padStart(2, '0');
-        return path.join(baseDir, 'claims', String(year), month, String(metadata.claim_id));
+        return `claims/${year}/${month}/${metadata.claim_id}`;
       }
-      return path.join(baseDir, 'claims', 'temp');
+      return 'claims/temp';
 
     case 'payslip':
       if (metadata.year && metadata.month) {
-        return path.join(baseDir, 'payslips', String(metadata.year), String(metadata.month));
+        return `payslips/${metadata.year}/${metadata.month}`;
       }
-      return path.join(baseDir, 'payslips', 'temp');
+      return 'payslips/temp';
 
     case 'leave_document':
       if (metadata.leave_id) {
-        return path.join(baseDir, 'leaves', String(metadata.leave_id));
+        return `leaves/${metadata.leave_id}`;
       }
-      return path.join(baseDir, 'leaves', 'temp');
+      return 'leaves/temp';
 
-    case 'company_document':
+    case 'company_document': {
       const subDir = metadata.sub_category || 'general';
-      return path.join(baseDir, 'company', subDir);
+      return `company/${subDir}`;
+    }
 
     case 'invoice':
       if (metadata.year) {
-        return path.join(baseDir, 'invoices', String(metadata.year));
+        return `invoices/${metadata.year}`;
       }
-      return path.join(baseDir, 'invoices', 'temp');
+      return 'invoices/temp';
 
     default:
-      return path.join(baseDir, 'temp');
+      return 'temp';
   }
 };
 
-// Ensure directory exists
-const ensureDirectoryExists = (dirPath) => {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
-};
-
-// Dynamic storage configuration
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    try {
-      // Get metadata from request body or query
-      const category = req.body.category || req.query.category || 'other';
-      const metadata = {
-        employee_id: req.body.employee_id || req.query.employee_id,
-        claim_id: req.body.claim_id || req.query.claim_id,
-        leave_id: req.body.leave_id || req.query.leave_id,
-        year: req.body.year || req.query.year,
-        month: req.body.month || req.query.month,
-        sub_category: req.body.sub_category || req.query.sub_category
-      };
-
-      const storagePath = getStoragePath(category, metadata);
-      ensureDirectoryExists(storagePath);
-
-      cb(null, storagePath);
-    } catch (error) {
-      cb(error);
-    }
-  },
-  filename: (req, file, cb) => {
-    const uniqueFilename = generateFilename(file.originalname);
-    cb(null, uniqueFilename);
-  }
-});
+// Memory storage (files buffered in memory, then uploaded to Supabase Storage)
+const storage = multer.memoryStorage();
 
 // Multer upload configuration
 const upload = multer({
@@ -162,6 +127,5 @@ module.exports = {
   ALLOWED_FILE_TYPES,
   sanitizeFilename,
   generateFilename,
-  getStoragePath,
-  ensureDirectoryExists
+  getStoragePath
 };

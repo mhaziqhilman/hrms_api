@@ -74,6 +74,23 @@ router.get(
 );
 
 /**
+ * @route   GET /api/payroll/my-payslips
+ * @desc    Get current user's payslips
+ * @access  Private (All authenticated users)
+ */
+router.get(
+  '/my-payslips',
+  verifyToken,
+  [
+    query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
+    query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('Limit must be between 1 and 50'),
+    query('year').optional().isInt({ min: 2020, max: 2100 }).withMessage('Invalid year')
+  ],
+  validate,
+  payrollController.getMyPayslips
+);
+
+/**
  * @route   GET /api/payroll/:id
  * @desc    Get single payroll record by ID
  * @access  Private (Admin, Manager, Staff - own records only)
@@ -115,8 +132,22 @@ router.put(
 );
 
 /**
+ * @route   PATCH /api/payroll/:id/submit
+ * @desc    Submit payroll for approval (Draft -> Pending)
+ * @access  Private (Manager)
+ */
+router.patch(
+  '/:id/submit',
+  verifyToken,
+  requireManager,
+  idParamValidation,
+  validate,
+  payrollController.submitForApproval
+);
+
+/**
  * @route   PATCH /api/payroll/:id/approve
- * @desc    Approve payroll
+ * @desc    Approve payroll (Pending -> Approved)
  * @access  Private (Admin)
  */
 router.patch(

@@ -449,3 +449,109 @@ exports.getEmployeeStatistics = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Get own profile (for authenticated employee)
+ */
+exports.getOwnProfile = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    const employee = await Employee.findOne({
+      where: { user_id: userId },
+      attributes: { exclude: ['user_id'] }
+    });
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: 'No employee profile linked to this account'
+      });
+    }
+
+    logger.info(`Own profile retrieved for employee ${employee.id}`);
+
+    res.status(200).json({
+      success: true,
+      data: employee
+    });
+  } catch (error) {
+    logger.error('Error fetching own profile:', error);
+    next(error);
+  }
+};
+
+/**
+ * Update own profile (for authenticated employee)
+ * Only allows updating non-sensitive fields
+ */
+exports.updateOwnProfile = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+
+    const employee = await Employee.findOne({
+      where: { user_id: userId }
+    });
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: 'Employee profile not found'
+      });
+    }
+
+    // Only allow updating specific fields
+    const allowedFields = [
+      'mobile',
+      'email',
+      'current_address',
+      'permanent_address',
+      'emergency_contact_name',
+      'emergency_contact_phone',
+      'photo_url'
+    ];
+
+    // Filter request body to only include allowed fields
+    const updateData = {};
+    for (const field of allowedFields) {
+      if (req.body[field] !== undefined) {
+        updateData[field] = req.body[field];
+      }
+    }
+
+    // Check if any restricted fields were sent
+    const restrictedFields = [
+      'basic_salary', 'position', 'department', 'employment_type',
+      'employment_status', 'join_date', 'confirmation_date',
+      'reporting_manager_id', 'bank_name', 'bank_account_no',
+      'epf_no', 'socso_no', 'tax_no', 'ic_no', 'passport_no'
+    ];
+
+    const attemptedRestrictedFields = restrictedFields.filter(field => req.body[field] !== undefined);
+    if (attemptedRestrictedFields.length > 0) {
+      logger.warn(`Employee ${employeeId} attempted to update restricted fields: ${attemptedRestrictedFields.join(', ')}`);
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid fields to update. Allowed fields: ' + allowedFields.join(', ')
+      });
+    }
+
+    await employee.update(updateData);
+
+    logger.info(`Own profile updated for employee ${employeeId}`, {
+      updatedFields: Object.keys(updateData)
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: employee
+    });
+  } catch (error) {
+    logger.error('Error updating own profile:', error);
+    next(error);
+  }
+};

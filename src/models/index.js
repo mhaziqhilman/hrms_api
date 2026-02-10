@@ -15,6 +15,7 @@ const Memo = require('./Memo');
 const MemoReadReceipt = require('./MemoReadReceipt');
 const Policy = require('./Policy');
 const PolicyAcknowledgment = require('./PolicyAcknowledgment');
+const UserSettings = require('./UserSettings');
 
 // Define associations
 
@@ -137,6 +138,10 @@ PolicyAcknowledgment.belongsTo(Policy, { foreignKey: 'policy_id', as: 'policy' }
 Employee.hasMany(PolicyAcknowledgment, { foreignKey: 'employee_id', as: 'policy_acknowledgments' });
 PolicyAcknowledgment.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
 
+// User - UserSettings (One-to-One)
+User.hasOne(UserSettings, { foreignKey: 'user_id', as: 'settings' });
+UserSettings.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
 // Sync database
 const syncDatabase = async (options = {}) => {
   try {
@@ -166,5 +171,6 @@ module.exports = {
   MemoReadReceipt,
   Policy,
   PolicyAcknowledgment,
+  UserSettings,
   syncDatabase
 };

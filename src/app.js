@@ -21,6 +21,11 @@ const claimTypeRoutes = require('./routes/claimType.routes');
 const fileRoutes = require('./routes/file.routes');
 const memoRoutes = require('./routes/memo.routes');
 const policyRoutes = require('./routes/policy.routes');
+const statutoryReportsRoutes = require('./routes/statutory-reports.routes');
+const analyticsRoutes = require('./routes/analytics.routes');
+const dashboardRoutes = require('./routes/dashboard.routes');
+const userManagementRoutes = require('./routes/userManagement.routes');
+const settingsRoutes = require('./routes/settings.routes');
 
 // Initialize express app
 const app = express();
@@ -84,6 +89,11 @@ app.use('/api/claim-types', claimTypeRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/memos', memoRoutes);
 app.use('/api/policies', policyRoutes);
+app.use('/api/statutory-reports', statutoryReportsRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/users', userManagementRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // Placeholder routes for other modules (to be implemented)
 // app.use('/api/invoices', invoiceRoutes);

@@ -92,6 +92,38 @@ router.get(
 );
 
 /**
+ * @route   GET /api/employees/me
+ * @desc    Get own employee profile
+ * @access  Private (All authenticated users)
+ */
+router.get(
+  '/me',
+  verifyToken,
+  employeeController.getOwnProfile
+);
+
+/**
+ * @route   PUT /api/employees/me
+ * @desc    Update own profile (limited fields)
+ * @access  Private (All authenticated users)
+ */
+router.put(
+  '/me',
+  verifyToken,
+  [
+    body('mobile').optional().isString().withMessage('Mobile must be a string'),
+    body('email').optional().isEmail().withMessage('Must be a valid email address'),
+    body('current_address').optional().isString().withMessage('Current address must be a string'),
+    body('permanent_address').optional().isString().withMessage('Permanent address must be a string'),
+    body('emergency_contact_name').optional().isString().withMessage('Emergency contact name must be a string'),
+    body('emergency_contact_phone').optional().isString().withMessage('Emergency contact phone must be a string'),
+    body('photo_url').optional().isURL().withMessage('Photo URL must be a valid URL'),
+    validate
+  ],
+  employeeController.updateOwnProfile
+);
+
+/**
  * @route   GET /api/employees
  * @desc    Get all employees with pagination and filtering
  * @access  Admin, Manager

@@ -1,6 +1,5 @@
-const fs = require('fs');
-const path = require('path');
 const File = require('../models/File');
+const supabaseStorage = require('./supabaseStorageService');
 
 class FileService {
   /**
@@ -116,7 +115,7 @@ class FileService {
   }
 
   /**
-   * Permanently delete file (from database and file system)
+   * Permanently delete file (from Supabase Storage and database)
    */
   async permanentDeleteFile(fileId) {
     try {
@@ -125,9 +124,11 @@ class FileService {
         throw new Error('File not found');
       }
 
-      // Delete file from file system
-      if (fs.existsSync(file.file_path)) {
-        fs.unlinkSync(file.file_path);
+      // Delete file from Supabase Storage
+      try {
+        await supabaseStorage.deleteFile(file.file_path);
+      } catch (storageError) {
+        console.warn(`Warning: Could not delete file from storage: ${storageError.message}`);
       }
 
       // Delete from database
@@ -136,52 +137,6 @@ class FileService {
       return { message: 'File permanently deleted' };
     } catch (error) {
       throw error;
-    }
-  }
-
-  /**
-   * Check file exists
-   */
-  fileExists(filePath) {
-    return fs.existsSync(filePath);
-  }
-
-  /**
-   * Get file stats
-   */
-  getFileStats(filePath) {
-    try {
-      return fs.statSync(filePath);
-    } catch (error) {
-      throw new Error('File not found in file system');
-    }
-  }
-
-  /**
-   * Clean up temp files older than 24 hours
-   */
-  async cleanupTempFiles() {
-    try {
-      const tempDir = path.join(__dirname, '../../uploads/temp');
-      const now = Date.now();
-      const twentyFourHours = 24 * 60 * 60 * 1000;
-
-      if (fs.existsSync(tempDir)) {
-        const files = fs.readdirSync(tempDir);
-
-        for (const file of files) {
-          const filePath = path.join(tempDir, file);
-          const stats = fs.statSync(filePath);
-
-          if (now - stats.mtimeMs > twentyFourHours) {
-            fs.unlinkSync(filePath);
-          }
-        }
-      }
-
-      return { message: 'Temp files cleaned up' };
-    } catch (error) {
-      throw new Error(`Failed to cleanup temp files: ${error.message}`);
     }
   }
 

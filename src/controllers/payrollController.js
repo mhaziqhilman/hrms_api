@@ -17,16 +17,28 @@ exports.getAllPayroll = async (req, res, next) => {
       status,
       year,
       month,
-      employee_id
+      employee_id,
+      search
     } = req.query;
 
     const offset = (page - 1) * limit;
     const where = {};
+    const includeWhere = {};
 
     if (status) where.status = status;
     if (year) where.year = parseInt(year);
     if (month) where.month = parseInt(month);
     if (employee_id) where.employee_id = parseInt(employee_id);
+
+    // Add search functionality for employee name or employee_id
+    let hasSearch = false;
+    if (search) {
+      includeWhere[Op.or] = [
+        { full_name: { [Op.like]: `%${search}%` } },
+        { employee_id: { [Op.like]: `%${search}%` } }
+      ];
+      hasSearch = true;
+    }
 
     const { count, rows } = await Payroll.findAndCountAll({
       where,
@@ -37,14 +49,17 @@ exports.getAllPayroll = async (req, res, next) => {
         {
           model: Employee,
           as: 'employee',
-          attributes: ['id', 'employee_id', 'full_name', 'position', 'department']
+          attributes: ['id', 'employee_id', 'full_name', 'position', 'department'],
+          where: hasSearch ? includeWhere : undefined,
+          required: hasSearch // Use INNER JOIN when searching
         }
-      ]
+      ],
+      distinct: true // Fix count when using INNER JOIN
     });
 
     logger.info(`Retrieved ${rows.length} payroll records`, {
       user_id: req.user.id,
-      filters: { status, year, month, employee_id }
+      filters: { status, year, month, employee_id, search }
     });
 
     res.status(200).json({
@@ -312,7 +327,49 @@ exports.updatePayroll = async (req, res, next) => {
 };
 
 /**
- * Approve payroll
+ * Submit payroll for approval (Draft -> Pending)
+ */
+exports.submitForApproval = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const payroll = await Payroll.findByPk(id);
+
+    if (!payroll) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payroll record not found'
+      });
+    }
+
+    if (payroll.status !== 'Draft') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only draft payroll can be submitted for approval'
+      });
+    }
+
+    await payroll.update({
+      status: 'Pending',
+      submitted_by: req.user.id,
+      submitted_at: new Date()
+    });
+
+    logger.info(`Payroll ${id} submitted for approval by user ${req.user.id}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Payroll submitted for approval successfully',
+      data: payroll
+    });
+  } catch (error) {
+    logger.error(`Error submitting payroll for approval ${req.params.id}:`, error);
+    next(error);
+  }
+};
+
+/**
+ * Approve payroll (Pending -> Approved)
  */
 exports.approvePayroll = async (req, res, next) => {
   try {
@@ -622,5 +679,96 @@ async function updateYTDStatutory(employee_id, year, month, statutory, gross_sal
     ytd_pcb: ytdTotals.ytd_pcb + statutory.pcb
   }, { transaction });
 }
+
+/**
+ * Get my payslips (for authenticated employee)
+ */
+exports.getMyPayslips = async (req, res, next) => {
+  try {
+    const employeeId = req.user.employee_id;
+
+    if (!employeeId) {
+      return res.status(400).json({
+        success: false,
+        message: 'No employee profile linked to this account'
+      });
+    }
+
+    const { page = 1, limit = 12, year } = req.query;
+    const offset = (page - 1) * limit;
+
+    const where = {
+      employee_id: employeeId,
+      status: { [Op.in]: ['Approved', 'Paid'] }
+    };
+
+    if (year) {
+      where.year = parseInt(year);
+    }
+
+    const { count, rows } = await Payroll.findAndCountAll({
+      where,
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      order: [['year', 'DESC'], ['month', 'DESC']],
+      include: [{
+        model: Employee,
+        as: 'employee',
+        attributes: ['id', 'employee_id', 'full_name', 'position', 'department']
+      }]
+    });
+
+    // Calculate YTD summary
+    const currentYear = new Date().getFullYear();
+    const ytdData = await Payroll.findAll({
+      attributes: [
+        [sequelize.fn('SUM', sequelize.col('gross_salary')), 'total_gross'],
+        [sequelize.fn('SUM', sequelize.col('net_salary')), 'total_net'],
+        [sequelize.fn('SUM', sequelize.col('epf_employee')), 'total_epf'],
+        [sequelize.fn('SUM', sequelize.col('socso_employee')), 'total_socso'],
+        [sequelize.fn('SUM', sequelize.col('eis_employee')), 'total_eis'],
+        [sequelize.fn('SUM', sequelize.col('pcb_deduction')), 'total_pcb']
+      ],
+      where: {
+        employee_id: employeeId,
+        year: currentYear,
+        status: { [Op.in]: ['Approved', 'Paid'] }
+      },
+      raw: true
+    });
+
+    const ytdSummary = ytdData[0] || {};
+
+    logger.info(`My payslips retrieved for employee ${employeeId}`, {
+      user_id: req.user.id,
+      count: rows.length
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        payslips: rows,
+        ytd_summary: {
+          year: currentYear,
+          total_gross: parseFloat(ytdSummary.total_gross || 0),
+          total_net: parseFloat(ytdSummary.total_net || 0),
+          total_epf: parseFloat(ytdSummary.total_epf || 0),
+          total_socso: parseFloat(ytdSummary.total_socso || 0),
+          total_eis: parseFloat(ytdSummary.total_eis || 0),
+          total_pcb: parseFloat(ytdSummary.total_pcb || 0)
+        },
+        pagination: {
+          total: count,
+          currentPage: parseInt(page),
+          limit: parseInt(limit),
+          totalPages: Math.ceil(count / limit)
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching my payslips:', error);
+    next(error);
+  }
+};
 
 module.exports = exports;

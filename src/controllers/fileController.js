@@ -1,6 +1,7 @@
 const path = require('path');
-const fs = require('fs');
 const fileService = require('../services/fileService');
+const supabaseStorage = require('../services/supabaseStorageService');
+const { generateFilename, getStoragePath } = require('../config/upload.config');
 const File = require('../models/File');
 
 // Upload file(s)
@@ -25,13 +26,29 @@ exports.uploadFiles = async (req, res) => {
       is_public
     } = req.body;
 
+    const metadata = {
+      employee_id: related_to_employee_id,
+      claim_id: related_to_claim_id,
+      leave_id: related_to_leave_id,
+      year: req.body.year,
+      month: req.body.month,
+      sub_category: sub_category
+    };
+
+    const storageDirPath = getStoragePath(category || 'other', metadata);
     const uploadedFiles = [];
 
     for (const file of req.files) {
+      const uniqueFilename = generateFilename(file.originalname);
+      const storagePath = `${storageDirPath}/${uniqueFilename}`;
+
+      // Upload to Supabase Storage
+      await supabaseStorage.uploadFile(file.buffer, storagePath, file.mimetype);
+
       const fileData = {
         original_filename: file.originalname,
-        stored_filename: file.filename,
-        file_path: file.path,
+        stored_filename: uniqueFilename,
+        file_path: storagePath,
         file_size: file.size,
         mime_type: file.mimetype,
         file_extension: path.extname(file.originalname).toLowerCase(),
@@ -156,22 +173,14 @@ exports.downloadFile = async (req, res) => {
       }
     }
 
-    // Check if file exists
-    if (!fileService.fileExists(file.file_path)) {
-      return res.status(404).json({
-        success: false,
-        message: 'File not found in file system'
-      });
-    }
+    // Get file from Supabase Storage
+    const buffer = await supabaseStorage.downloadFile(file.file_path);
 
     // Set headers for file download
     res.setHeader('Content-Type', file.mime_type);
     res.setHeader('Content-Disposition', `attachment; filename="${file.original_filename}"`);
-    res.setHeader('Content-Length', file.file_size);
-
-    // Stream file to response
-    const fileStream = fs.createReadStream(file.file_path);
-    fileStream.pipe(res);
+    res.setHeader('Content-Length', buffer.length);
+    res.send(buffer);
   } catch (error) {
     console.error('Error downloading file:', error);
     const statusCode = error.message === 'File not found' ? 404 : 500;
@@ -198,22 +207,14 @@ exports.previewFile = async (req, res) => {
       }
     }
 
-    // Check if file exists
-    if (!fileService.fileExists(file.file_path)) {
-      return res.status(404).json({
-        success: false,
-        message: 'File not found in file system'
-      });
-    }
+    // Get file from Supabase Storage
+    const buffer = await supabaseStorage.downloadFile(file.file_path);
 
     // Set headers for inline preview
     res.setHeader('Content-Type', file.mime_type);
     res.setHeader('Content-Disposition', `inline; filename="${file.original_filename}"`);
-    res.setHeader('Content-Length', file.file_size);
-
-    // Stream file to response
-    const fileStream = fs.createReadStream(file.file_path);
-    fileStream.pipe(res);
+    res.setHeader('Content-Length', buffer.length);
+    res.send(buffer);
   } catch (error) {
     console.error('Error previewing file:', error);
     const statusCode = error.message === 'File not found' ? 404 : 500;

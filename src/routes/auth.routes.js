@@ -92,4 +92,30 @@ router.post(
  */
 router.post('/logout', verifyToken, authController.logout);
 
+/**
+ * @route   POST /api/auth/change-password
+ * @desc    Change password (authenticated user)
+ * @access  Private
+ */
+router.post(
+  '/change-password',
+  verifyToken,
+  [
+    body('currentPassword').notEmpty().withMessage('Current password is required'),
+    body('newPassword')
+      .isLength({ min: 8 })
+      .withMessage('Password must be at least 8 characters')
+      .matches(/[A-Z]/)
+      .withMessage('Password must contain at least one uppercase letter')
+      .matches(/[a-z]/)
+      .withMessage('Password must contain at least one lowercase letter')
+      .matches(/[0-9]/)
+      .withMessage('Password must contain at least one number')
+      .matches(/[@$!%*?&]/)
+      .withMessage('Password must contain at least one special character (@$!%*?&)'),
+    validate
+  ],
+  authController.changePassword
+);
+
 module.exports = router;
