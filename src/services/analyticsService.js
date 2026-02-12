@@ -8,12 +8,13 @@ const { sequelize, Payroll, Employee, Leave, LeaveType, Attendance, Claim, Claim
 
 /**
  * Get payroll cost analytics
+ * @param {Number} companyId - Company ID to filter by
  * @param {Number} year - Year to analyze
  * @param {Number} startMonth - Start month (optional, default 1)
  * @param {Number} endMonth - End month (optional, default 12)
  * @returns {Object} Payroll analytics data
  */
-const getPayrollCostAnalytics = async (year, startMonth = 1, endMonth = 12) => {
+const getPayrollCostAnalytics = async (companyId, year, startMonth = 1, endMonth = 12) => {
   // Aggregate by month
   const byMonth = await Payroll.findAll({
     attributes: [
@@ -29,6 +30,13 @@ const getPayrollCostAnalytics = async (year, startMonth = 1, endMonth = 12) => {
       [fn('SUM', col('pcb_deduction')), 'total_pcb'],
       [fn('COUNT', col('Payroll.id')), 'employee_count']
     ],
+    include: [{
+      model: Employee,
+      as: 'employee',
+      where: { company_id: companyId },
+      attributes: [],
+      required: true
+    }],
     where: {
       year,
       month: { [Op.between]: [startMonth, endMonth] },
@@ -50,6 +58,7 @@ const getPayrollCostAnalytics = async (year, startMonth = 1, endMonth = 12) => {
     include: [{
       model: Employee,
       as: 'employee',
+      where: { company_id: companyId },
       attributes: []
     }],
     where: {
@@ -72,6 +81,12 @@ const getPayrollCostAnalytics = async (year, startMonth = 1, endMonth = 12) => {
       [fn('SUM', col('pcb_deduction')), 'total_pcb'],
       [fn('COUNT', fn('DISTINCT', col('employee_id'))), 'employee_count']
     ],
+    include: [{
+      model: Employee,
+      as: 'employee',
+      where: { company_id: companyId },
+      attributes: []
+    }],
     where: {
       year,
       month: { [Op.between]: [startMonth, endMonth] },
@@ -116,10 +131,11 @@ const getPayrollCostAnalytics = async (year, startMonth = 1, endMonth = 12) => {
 
 /**
  * Get leave utilization analytics
+ * @param {Number} companyId - Company ID to filter by
  * @param {Number} year - Year to analyze
  * @returns {Object} Leave analytics data
  */
-const getLeaveUtilizationAnalytics = async (year) => {
+const getLeaveUtilizationAnalytics = async (companyId, year) => {
   const startDate = `${year}-01-01`;
   const endDate = `${year}-12-31`;
 
@@ -130,11 +146,20 @@ const getLeaveUtilizationAnalytics = async (year) => {
       [fn('SUM', col('total_days')), 'total_days'],
       [fn('COUNT', col('Leave.id')), 'request_count']
     ],
-    include: [{
-      model: LeaveType,
-      as: 'leave_type',
-      attributes: []
-    }],
+    include: [
+      {
+        model: LeaveType,
+        as: 'leave_type',
+        attributes: []
+      },
+      {
+        model: Employee,
+        as: 'employee',
+        where: { company_id: companyId },
+        attributes: [],
+        required: true
+      }
+    ],
     where: {
       start_date: { [Op.gte]: startDate },
       end_date: { [Op.lte]: endDate },
@@ -151,6 +176,13 @@ const getLeaveUtilizationAnalytics = async (year) => {
       [fn('SUM', col('total_days')), 'total_days'],
       [fn('COUNT', col('Leave.id')), 'request_count']
     ],
+    include: [{
+      model: Employee,
+      as: 'employee',
+      where: { company_id: companyId },
+      attributes: [],
+      required: true
+    }],
     where: {
       start_date: { [Op.gte]: startDate },
       end_date: { [Op.lte]: endDate },
@@ -171,6 +203,7 @@ const getLeaveUtilizationAnalytics = async (year) => {
     include: [{
       model: Employee,
       as: 'employee',
+      where: { company_id: companyId },
       attributes: []
     }],
     where: {
@@ -186,8 +219,15 @@ const getLeaveUtilizationAnalytics = async (year) => {
   const byStatus = await Leave.findAll({
     attributes: [
       'status',
-      [fn('COUNT', col('id')), 'count']
+      [fn('COUNT', col('Leave.id')), 'count']
     ],
+    include: [{
+      model: Employee,
+      as: 'employee',
+      where: { company_id: companyId },
+      attributes: [],
+      required: true
+    }],
     where: {
       start_date: { [Op.gte]: startDate }
     },
@@ -228,11 +268,12 @@ const getLeaveUtilizationAnalytics = async (year) => {
 
 /**
  * Get attendance punctuality analytics
+ * @param {Number} companyId - Company ID to filter by
  * @param {Number} year - Year to analyze
  * @param {Number} month - Month to analyze (optional)
  * @returns {Object} Attendance analytics data
  */
-const getAttendancePunctualityAnalytics = async (year, month = null) => {
+const getAttendancePunctualityAnalytics = async (companyId, year, month = null) => {
   let startDate, endDate;
 
   if (month) {
@@ -247,12 +288,18 @@ const getAttendancePunctualityAnalytics = async (year, month = null) => {
   // Overall punctuality stats
   const overallStats = await Attendance.findOne({
     attributes: [
-      [fn('COUNT', col('id')), 'total_records'],
+      [fn('COUNT', col('Attendance.id')), 'total_records'],
       [fn('SUM', literal('CASE WHEN is_late = true THEN 1 ELSE 0 END')), 'late_count'],
       [fn('SUM', literal('CASE WHEN is_early_leave = true THEN 1 ELSE 0 END')), 'early_leave_count'],
       [fn('AVG', col('late_minutes')), 'avg_late_minutes'],
       [fn('AVG', col('total_hours')), 'avg_working_hours']
     ],
+    include: [{
+      model: Employee,
+      as: 'employee',
+      where: { company_id: companyId },
+      attributes: []
+    }],
     where: {
       date: { [Op.between]: [startDate, endDate] }
     },
@@ -270,6 +317,7 @@ const getAttendancePunctualityAnalytics = async (year, month = null) => {
     include: [{
       model: Employee,
       as: 'employee',
+      where: { company_id: companyId },
       attributes: []
     }],
     where: {
@@ -285,9 +333,16 @@ const getAttendancePunctualityAnalytics = async (year, month = null) => {
     trend = await Attendance.findAll({
       attributes: [
         'date',
-        [fn('COUNT', col('id')), 'total_records'],
+        [fn('COUNT', col('Attendance.id')), 'total_records'],
         [fn('SUM', literal('CASE WHEN is_late = true THEN 1 ELSE 0 END')), 'late_count']
       ],
+      include: [{
+        model: Employee,
+        as: 'employee',
+        where: { company_id: companyId },
+        attributes: [],
+        required: true
+      }],
       where: {
         date: { [Op.between]: [startDate, endDate] }
       },
@@ -299,10 +354,17 @@ const getAttendancePunctualityAnalytics = async (year, month = null) => {
     trend = await Attendance.findAll({
       attributes: [
         [fn('date_part', literal("'month'"), col('date')), 'month'],
-        [fn('COUNT', col('id')), 'total_records'],
+        [fn('COUNT', col('Attendance.id')), 'total_records'],
         [fn('SUM', literal('CASE WHEN is_late = true THEN 1 ELSE 0 END')), 'late_count'],
         [fn('AVG', col('total_hours')), 'avg_working_hours']
       ],
+      include: [{
+        model: Employee,
+        as: 'employee',
+        where: { company_id: companyId },
+        attributes: [],
+        required: true
+      }],
       where: {
         date: { [Op.between]: [startDate, endDate] }
       },
@@ -316,8 +378,15 @@ const getAttendancePunctualityAnalytics = async (year, month = null) => {
   const byWorkType = await Attendance.findAll({
     attributes: [
       'type',
-      [fn('COUNT', col('id')), 'count']
+      [fn('COUNT', col('Attendance.id')), 'count']
     ],
+    include: [{
+      model: Employee,
+      as: 'employee',
+      where: { company_id: companyId },
+      attributes: [],
+      required: true
+    }],
     where: {
       date: { [Op.between]: [startDate, endDate] }
     },
@@ -366,10 +435,11 @@ const getAttendancePunctualityAnalytics = async (year, month = null) => {
 
 /**
  * Get claims spending analytics
+ * @param {Number} companyId - Company ID to filter by
  * @param {Number} year - Year to analyze
  * @returns {Object} Claims analytics data
  */
-const getClaimsSpendingAnalytics = async (year) => {
+const getClaimsSpendingAnalytics = async (companyId, year) => {
   const startDate = `${year}-01-01`;
   const endDate = `${year}-12-31`;
 
@@ -381,11 +451,20 @@ const getClaimsSpendingAnalytics = async (year) => {
       [fn('COUNT', col('Claim.id')), 'claim_count'],
       [fn('AVG', col('amount')), 'avg_amount']
     ],
-    include: [{
-      model: ClaimType,
-      as: 'claimType',
-      attributes: []
-    }],
+    include: [
+      {
+        model: ClaimType,
+        as: 'claimType',
+        attributes: []
+      },
+      {
+        model: Employee,
+        as: 'employee',
+        where: { company_id: companyId },
+        attributes: [],
+        required: true
+      }
+    ],
     where: {
       date: { [Op.between]: [startDate, endDate] },
       status: { [Op.in]: ['Finance_Approved', 'Paid'] }
@@ -399,8 +478,15 @@ const getClaimsSpendingAnalytics = async (year) => {
     attributes: [
       [fn('date_part', literal("'month'"), col('date')), 'month'],
       [fn('SUM', col('amount')), 'total_amount'],
-      [fn('COUNT', col('id')), 'claim_count']
+      [fn('COUNT', col('Claim.id')), 'claim_count']
     ],
+    include: [{
+      model: Employee,
+      as: 'employee',
+      where: { company_id: companyId },
+      attributes: [],
+      required: true
+    }],
     where: {
       date: { [Op.between]: [startDate, endDate] },
       status: { [Op.in]: ['Finance_Approved', 'Paid'] }
@@ -420,6 +506,7 @@ const getClaimsSpendingAnalytics = async (year) => {
     include: [{
       model: Employee,
       as: 'employee',
+      where: { company_id: companyId },
       attributes: []
     }],
     where: {
@@ -434,9 +521,16 @@ const getClaimsSpendingAnalytics = async (year) => {
   const byStatus = await Claim.findAll({
     attributes: [
       'status',
-      [fn('COUNT', col('id')), 'count'],
+      [fn('COUNT', col('Claim.id')), 'count'],
       [fn('SUM', col('amount')), 'total_amount']
     ],
+    include: [{
+      model: Employee,
+      as: 'employee',
+      where: { company_id: companyId },
+      attributes: [],
+      required: true
+    }],
     where: {
       date: { [Op.between]: [startDate, endDate] }
     },
@@ -486,11 +580,12 @@ const getClaimsSpendingAnalytics = async (year) => {
 
 /**
  * Get dashboard summary with key metrics
+ * @param {Number} companyId - Company ID to filter by
  * @param {Number} year - Year to analyze
  * @param {Number} month - Month to analyze
  * @returns {Object} Dashboard summary data
  */
-const getDashboardSummary = async (year, month) => {
+const getDashboardSummary = async (companyId, year, month) => {
   const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
   const lastDay = new Date(year, month, 0).getDate();
   const endDate = `${year}-${String(month).padStart(2, '0')}-${lastDay}`;
@@ -502,6 +597,12 @@ const getDashboardSummary = async (year, month) => {
       [fn('SUM', col('net_salary')), 'total_net'],
       [fn('COUNT', fn('DISTINCT', col('employee_id'))), 'employee_count']
     ],
+    include: [{
+      model: Employee,
+      as: 'employee',
+      where: { company_id: companyId },
+      attributes: []
+    }],
     where: {
       year,
       month,
@@ -512,11 +613,20 @@ const getDashboardSummary = async (year, month) => {
 
   // Active employees count
   const activeEmployees = await Employee.count({
-    where: { employment_status: 'Active' }
+    where: {
+      employment_status: 'Active',
+      company_id: companyId
+    }
   });
 
   // Leave count for the month
   const leaveCount = await Leave.count({
+    include: [{
+      model: Employee,
+      as: 'employee',
+      where: { company_id: companyId },
+      attributes: []
+    }],
     where: {
       start_date: { [Op.between]: [startDate, endDate] },
       status: 'Approved'
@@ -525,6 +635,12 @@ const getDashboardSummary = async (year, month) => {
 
   // Pending claims
   const pendingClaims = await Claim.count({
+    include: [{
+      model: Employee,
+      as: 'employee',
+      where: { company_id: companyId },
+      attributes: []
+    }],
     where: {
       status: { [Op.in]: ['Pending', 'Manager_Approved'] }
     }
@@ -533,9 +649,15 @@ const getDashboardSummary = async (year, month) => {
   // Attendance for the month
   const attendanceStats = await Attendance.findOne({
     attributes: [
-      [fn('COUNT', col('id')), 'total_records'],
+      [fn('COUNT', col('Attendance.id')), 'total_records'],
       [fn('SUM', literal('CASE WHEN is_late = true THEN 1 ELSE 0 END')), 'late_count']
     ],
+    include: [{
+      model: Employee,
+      as: 'employee',
+      where: { company_id: companyId },
+      attributes: []
+    }],
     where: {
       date: { [Op.between]: [startDate, endDate] }
     },

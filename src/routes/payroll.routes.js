@@ -90,6 +90,51 @@ router.get(
   payrollController.getMyPayslips
 );
 
+// Bulk action validation
+const bulkIdsValidation = [
+  body('payroll_ids')
+    .isArray({ min: 1 })
+    .withMessage('payroll_ids must be a non-empty array'),
+  body('payroll_ids.*')
+    .isInt()
+    .withMessage('Each payroll ID must be an integer')
+];
+
+/**
+ * @route   POST /api/payroll/bulk-submit
+ * @desc    Bulk submit payrolls for approval (Draft -> Pending)
+ * @access  Private (Manager)
+ */
+router.post('/bulk-submit', verifyToken, requireManager, bulkIdsValidation, validate, payrollController.bulkSubmitForApproval);
+
+/**
+ * @route   POST /api/payroll/bulk-approve
+ * @desc    Bulk approve payrolls (Pending -> Approved)
+ * @access  Private (Admin)
+ */
+router.post('/bulk-approve', verifyToken, requireAdmin, bulkIdsValidation, validate, payrollController.bulkApprovePayroll);
+
+/**
+ * @route   POST /api/payroll/bulk-mark-paid
+ * @desc    Bulk mark payrolls as paid (Approved -> Paid)
+ * @access  Private (Admin)
+ */
+router.post('/bulk-mark-paid', verifyToken, requireAdmin, bulkIdsValidation, validate, payrollController.bulkMarkAsPaid);
+
+/**
+ * @route   POST /api/payroll/bulk-cancel
+ * @desc    Bulk cancel payrolls (soft delete)
+ * @access  Private (Admin)
+ */
+router.post('/bulk-cancel', verifyToken, requireAdmin, bulkIdsValidation, validate, payrollController.bulkCancelPayroll);
+
+/**
+ * @route   POST /api/payroll/bulk-delete
+ * @desc    Bulk permanently delete cancelled payrolls
+ * @access  Private (Admin)
+ */
+router.post('/bulk-delete', verifyToken, requireAdmin, bulkIdsValidation, validate, payrollController.bulkPermanentDeletePayroll);
+
 /**
  * @route   GET /api/payroll/:id
  * @desc    Get single payroll record by ID
@@ -185,6 +230,20 @@ router.delete(
   idParamValidation,
   validate,
   payrollController.deletePayroll
+);
+
+/**
+ * @route   DELETE /api/payroll/:id/permanent
+ * @desc    Permanently delete a cancelled payroll record
+ * @access  Private (Admin)
+ */
+router.delete(
+  '/:id/permanent',
+  verifyToken,
+  requireAdmin,
+  idParamValidation,
+  validate,
+  payrollController.permanentDeletePayroll
 );
 
 /**

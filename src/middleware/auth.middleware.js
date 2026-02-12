@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const jwtConfig = require('../config/jwt');
-const { User } = require('../models');
+const { User, Employee } = require('../models');
 
 /**
  * Verify JWT token and attach user to request
@@ -55,6 +55,25 @@ const verifyToken = async (req, res, next) => {
 
     // Attach user to request
     req.user = user;
+
+    // For super_admin: use company_id from JWT (view-only context) instead of DB
+    // Super_admin's DB company_id is always null; their viewing context lives in the JWT
+    if (user.role === 'super_admin' && decoded.company_id) {
+      req.user.company_id = decoded.company_id;
+    }
+
+    // Look up employee_id for the active/viewing company
+    const activeCompanyId = req.user.company_id;
+    if (activeCompanyId) {
+      const employee = await Employee.findOne({
+        where: { user_id: user.id, company_id: activeCompanyId },
+        attributes: ['id']
+      });
+      req.user.employee_id = employee ? employee.id : null;
+    } else {
+      req.user.employee_id = null;
+    }
+
     next();
   } catch (error) {
     if (error.name === 'TokenExpiredError') {

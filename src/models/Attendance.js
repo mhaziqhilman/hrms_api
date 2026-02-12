@@ -30,7 +30,6 @@ const Attendance = sequelize.define('Attendance', {
   total_hours: {
     type: DataTypes.DECIMAL(5, 2),
     allowNull: true,
-    comment: 'Total working hours'
   },
   type: {
     type: DataTypes.ENUM('Office', 'WFH'),
@@ -55,7 +54,7 @@ const Attendance = sequelize.define('Attendance', {
   late_minutes: {
     type: DataTypes.INTEGER,
     allowNull: true,
-    comment: 'Minutes late from standard start time (9:00 AM)'
+    _comment: 'Minutes late from standard start time (9:00 AM)'
   },
   is_early_leave: {
     type: DataTypes.BOOLEAN,
@@ -64,7 +63,7 @@ const Attendance = sequelize.define('Attendance', {
   early_leave_minutes: {
     type: DataTypes.INTEGER,
     allowNull: true,
-    comment: 'Minutes early from standard end time (6:00 PM)'
+    _comment: 'Minutes early from standard end time (6:00 PM)'
   },
   remarks: {
     type: DataTypes.TEXT,

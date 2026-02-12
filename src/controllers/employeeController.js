@@ -22,6 +22,9 @@ exports.getAllEmployees = async (req, res, next) => {
     const offset = (page - 1) * limit;
     const where = {};
 
+    // Filter by active company
+    where.company_id = req.user.company_id;
+
     // Apply filters
     if (status) {
       where.employment_status = status;
@@ -85,7 +88,8 @@ exports.getEmployeeById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const employee = await Employee.findByPk(id, {
+    const employee = await Employee.findOne({
+      where: { id, company_id: req.user.company_id },
       include: [
         {
           model: Employee,
@@ -162,9 +166,10 @@ exports.createEmployee = async (req, res, next) => {
       photo_url
     } = req.body;
 
-    // Check if employee_id already exists
+    // Check if employee_id already exists within the same company
     const existingEmployee = await Employee.findOne({
       where: {
+        company_id: req.user.company_id,
         [Op.or]: [
           { employee_id },
           ic_no ? { ic_no } : null
@@ -179,7 +184,7 @@ exports.createEmployee = async (req, res, next) => {
       });
     }
 
-    // Create employee
+    // Create employee scoped to active company
     const employee = await Employee.create({
       employee_id,
       full_name,
@@ -213,6 +218,7 @@ exports.createEmployee = async (req, res, next) => {
       tax_no,
       tax_category,
       photo_url,
+      company_id: req.user.company_id,
       employment_status: 'Active'
     });
 
@@ -243,7 +249,9 @@ exports.updateEmployee = async (req, res, next) => {
     const { id } = req.params;
     const updates = req.body;
 
-    const employee = await Employee.findByPk(id);
+    const employee = await Employee.findOne({
+      where: { id, company_id: req.user.company_id }
+    });
 
     if (!employee) {
       return res.status(404).json({
@@ -255,13 +263,22 @@ exports.updateEmployee = async (req, res, next) => {
     // Prevent updating certain fields if not allowed
     delete updates.id;
     delete updates.user_id;
+    delete updates.company_id;
     delete updates.created_at;
 
-    // Check for duplicate employee_id or ic_no if being updated
+    // Convert empty strings to null for optional fields
+    Object.keys(updates).forEach(key => {
+      if (updates[key] === '') {
+        updates[key] = null;
+      }
+    });
+
+    // Check for duplicate employee_id or ic_no within the same company
     if (updates.employee_id || updates.ic_no) {
       const existingEmployee = await Employee.findOne({
         where: {
           id: { [Op.ne]: id },
+          company_id: req.user.company_id,
           [Op.or]: [
             updates.employee_id ? { employee_id: updates.employee_id } : null,
             updates.ic_no ? { ic_no: updates.ic_no } : null
@@ -303,7 +320,9 @@ exports.deleteEmployee = async (req, res, next) => {
     const { id } = req.params;
     const { status = 'Resigned', reason } = req.body;
 
-    const employee = await Employee.findByPk(id);
+    const employee = await Employee.findOne({
+      where: { id, company_id: req.user.company_id }
+    });
 
     if (!employee) {
       return res.status(404).json({
@@ -348,7 +367,9 @@ exports.getEmployeeYTD = async (req, res, next) => {
     const { id } = req.params;
     const { year = new Date().getFullYear() } = req.query;
 
-    const employee = await Employee.findByPk(id);
+    const employee = await Employee.findOne({
+      where: { id, company_id: req.user.company_id }
+    });
 
     if (!employee) {
       return res.status(404).json({
@@ -403,16 +424,18 @@ exports.getEmployeeYTD = async (req, res, next) => {
  */
 exports.getEmployeeStatistics = async (req, res, next) => {
   try {
+    const companyId = req.user.company_id;
+
     const totalActive = await Employee.count({
-      where: { employment_status: 'Active' }
+      where: { company_id: companyId, employment_status: 'Active' }
     });
 
     const totalResigned = await Employee.count({
-      where: { employment_status: 'Resigned' }
+      where: { company_id: companyId, employment_status: 'Resigned' }
     });
 
     const totalTerminated = await Employee.count({
-      where: { employment_status: 'Terminated' }
+      where: { company_id: companyId, employment_status: 'Terminated' }
     });
 
     const byDepartment = await Employee.findAll({
@@ -420,7 +443,7 @@ exports.getEmployeeStatistics = async (req, res, next) => {
         'department',
         [sequelize.fn('COUNT', sequelize.col('id')), 'count']
       ],
-      where: { employment_status: 'Active' },
+      where: { company_id: companyId, employment_status: 'Active' },
       group: ['department']
     });
 
@@ -429,7 +452,7 @@ exports.getEmployeeStatistics = async (req, res, next) => {
         'employment_type',
         [sequelize.fn('COUNT', sequelize.col('id')), 'count']
       ],
-      where: { employment_status: 'Active' },
+      where: { company_id: companyId, employment_status: 'Active' },
       group: ['employment_type']
     });
 
@@ -458,7 +481,7 @@ exports.getOwnProfile = async (req, res, next) => {
     const userId = req.user.id;
 
     const employee = await Employee.findOne({
-      where: { user_id: userId },
+      where: { user_id: userId, company_id: req.user.company_id },
       attributes: { exclude: ['user_id'] }
     });
 
@@ -490,7 +513,7 @@ exports.updateOwnProfile = async (req, res, next) => {
     const userId = req.user.id;
 
     const employee = await Employee.findOne({
-      where: { user_id: userId }
+      where: { user_id: userId, company_id: req.user.company_id }
     });
 
     if (!employee) {
@@ -529,7 +552,7 @@ exports.updateOwnProfile = async (req, res, next) => {
 
     const attemptedRestrictedFields = restrictedFields.filter(field => req.body[field] !== undefined);
     if (attemptedRestrictedFields.length > 0) {
-      logger.warn(`Employee ${employeeId} attempted to update restricted fields: ${attemptedRestrictedFields.join(', ')}`);
+      logger.warn(`Employee ${employee.id} attempted to update restricted fields: ${attemptedRestrictedFields.join(', ')}`);
     }
 
     if (Object.keys(updateData).length === 0) {
@@ -541,7 +564,7 @@ exports.updateOwnProfile = async (req, res, next) => {
 
     await employee.update(updateData);
 
-    logger.info(`Own profile updated for employee ${employeeId}`, {
+    logger.info(`Own profile updated for employee ${employee.id}`, {
       updatedFields: Object.keys(updateData)
     });
 

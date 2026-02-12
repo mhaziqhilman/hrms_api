@@ -14,12 +14,11 @@ const Memo = sequelize.define('Memo', {
   content: {
     type: DataTypes.TEXT('long'),
     allowNull: false,
-    comment: 'Rich text content (HTML)'
   },
   summary: {
     type: DataTypes.STRING(500),
     allowNull: true,
-    comment: 'Brief summary for list view'
+    _comment: 'Brief summary for list view'
   },
   author_id: {
     type: DataTypes.INTEGER,
@@ -29,80 +28,77 @@ const Memo = sequelize.define('Memo', {
       key: 'id'
     },
     field: 'author_id',
-    comment: 'User who created the memo'
+    _comment: 'User who created the memo'
   },
   status: {
     type: DataTypes.ENUM('Draft', 'Published', 'Archived'),
     defaultValue: 'Draft',
-    allowNull: false,
-    comment: 'Publication status'
+    allowNull: false
   },
   priority: {
     type: DataTypes.ENUM('Low', 'Normal', 'High', 'Urgent'),
     defaultValue: 'Normal',
-    allowNull: false,
-    comment: 'Priority level for display'
+    allowNull: false
   },
   target_audience: {
     type: DataTypes.ENUM('All', 'Department', 'Position', 'Specific'),
     defaultValue: 'All',
     allowNull: false,
-    field: 'target_audience',
-    comment: 'Who can see this memo'
+    field: 'target_audience'
   },
   target_departments: {
     type: DataTypes.JSON,
     allowNull: true,
     field: 'target_departments',
-    comment: 'Array of department names if target_audience is Department'
+    _comment: 'Array of department names if target_audience is Department'
   },
   target_positions: {
     type: DataTypes.JSON,
     allowNull: true,
     field: 'target_positions',
-    comment: 'Array of position names if target_audience is Position'
+    _comment: 'Array of position names if target_audience is Position'
   },
   target_employee_ids: {
     type: DataTypes.JSON,
     allowNull: true,
     field: 'target_employee_ids',
-    comment: 'Array of employee IDs if target_audience is Specific'
+    _comment: 'Array of employee IDs if target_audience is Specific'
   },
   published_at: {
     type: DataTypes.DATE,
     allowNull: true,
     field: 'published_at',
-    comment: 'Timestamp when memo was published'
+    _comment: 'Timestamp when memo was published'
   },
   expires_at: {
     type: DataTypes.DATE,
     allowNull: true,
     field: 'expires_at',
-    comment: 'Optional expiry date for temporary announcements'
+    _comment: 'Optional expiry date for temporary announcements'
   },
   requires_acknowledgment: {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
     field: 'requires_acknowledgment',
-    comment: 'Whether employees must acknowledge reading this memo'
+    _comment: 'Whether employees must acknowledge reading this memo'
   },
   attachment_count: {
     type: DataTypes.INTEGER,
     defaultValue: 0,
     field: 'attachment_count',
-    comment: 'Number of file attachments'
+    _comment: 'Number of file attachments'
   },
   view_count: {
     type: DataTypes.INTEGER,
     defaultValue: 0,
     field: 'view_count',
-    comment: 'Total number of views'
+    _comment: 'Total number of views'
   },
   acknowledgment_count: {
     type: DataTypes.INTEGER,
     defaultValue: 0,
     field: 'acknowledgment_count',
-    comment: 'Number of employees who acknowledged'
+    _comment: 'Number of employees who acknowledged'
   }
 }, {
   tableName: 'memos',

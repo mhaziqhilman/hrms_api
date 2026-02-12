@@ -38,7 +38,6 @@ const Claim = sequelize.define('Claim', {
   receipt_url: {
     type: DataTypes.STRING(255),
     allowNull: true,
-    comment: 'URL to uploaded receipt image'
   },
   status: {
     type: DataTypes.ENUM('Pending', 'Manager_Approved', 'Finance_Approved', 'Rejected', 'Paid'),

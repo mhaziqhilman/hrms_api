@@ -1,15 +1,15 @@
 const { Op } = require('sequelize');
-const { User, Employee } = require('../models');
+const { User, Employee, Company } = require('../models');
 
 /**
  * Get all users with pagination, search, and filtering
  */
-const getUsers = async ({ page = 1, limit = 10, search, role, is_active }) => {
+const getUsers = async ({ page = 1, limit = 10, search, role, is_active, company_id }) => {
   const offset = (page - 1) * limit;
   const where = {};
 
   if (search) {
-    where.email = { [Op.like]: `%${search}%` };
+    where.email = { [Op.iLike]: `%${search}%` };
   }
 
   if (role) {
@@ -20,6 +20,11 @@ const getUsers = async ({ page = 1, limit = 10, search, role, is_active }) => {
     where.is_active = is_active === 'true' || is_active === true;
   }
 
+  // Always filter by company_id (required for multi-tenant isolation)
+  if (company_id) {
+    where.company_id = parseInt(company_id);
+  }
+
   const { count, rows: users } = await User.findAndCountAll({
     where,
     include: [
@@ -27,6 +32,12 @@ const getUsers = async ({ page = 1, limit = 10, search, role, is_active }) => {
         model: Employee,
         as: 'employee',
         attributes: ['id', 'employee_id', 'full_name', 'position', 'department', 'employment_status']
+      },
+      {
+        model: Company,
+        as: 'company',
+        attributes: ['id', 'name'],
+        required: false
       }
     ],
     attributes: { exclude: ['password', 'remember_token'] },
@@ -158,11 +169,12 @@ const unlinkUserFromEmployee = async (userId) => {
 /**
  * Get unlinked employees (employees without a user account)
  */
-const getUnlinkedEmployees = async () => {
+const getUnlinkedEmployees = async (companyId) => {
   const employees = await Employee.findAll({
     where: {
       user_id: null,
-      employment_status: 'Active'
+      employment_status: 'Active',
+      ...(companyId ? { company_id: companyId } : {})
     },
     attributes: ['id', 'employee_id', 'full_name', 'position', 'department', 'email'],
     order: [['full_name', 'ASC']]

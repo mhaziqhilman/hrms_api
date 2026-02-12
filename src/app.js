@@ -26,6 +26,12 @@ const analyticsRoutes = require('./routes/analytics.routes');
 const dashboardRoutes = require('./routes/dashboard.routes');
 const userManagementRoutes = require('./routes/userManagement.routes');
 const settingsRoutes = require('./routes/settings.routes');
+const companyRoutes = require('./routes/company.routes');
+const invitationRoutes = require('./routes/invitation.routes');
+const leaveTypeRoutes = require('./routes/leaveType.routes');
+const publicHolidayRoutes = require('./routes/publicHoliday.routes');
+const statutoryConfigRoutes = require('./routes/statutoryConfig.routes');
+const emailTemplateRoutes = require('./routes/emailTemplate.routes');
 
 // Initialize express app
 const app = express();
@@ -57,16 +63,28 @@ if (process.env.NODE_ENV === 'development') {
   }));
 }
 
-// Rate limiting
-const limiter = rateLimit({
+// Rate limiting - General API limiter (generous for SPA usage)
+const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.',
+  max: parseInt(process.env.RATE_LIMIT_MAX || '1000', 10), // 1000 requests per 15 min (SPA fires many calls per page)
+  message: { success: false, message: 'Too many requests from this IP, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'development' && process.env.RATE_LIMIT_ENABLED !== 'true'
+});
+
+// Strict rate limit for auth routes (prevent brute force)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // 20 login/register attempts per 15 min
+  message: { success: false, message: 'Too many authentication attempts, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false
 });
 
-app.use('/api', limiter);
+app.use('/api', apiLimiter);
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -94,6 +112,12 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/users', userManagementRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/company', companyRoutes);
+app.use('/api/invitations', invitationRoutes);
+app.use('/api/leave-types', leaveTypeRoutes);
+app.use('/api/public-holidays', publicHolidayRoutes);
+app.use('/api/statutory-config', statutoryConfigRoutes);
+app.use('/api/email-templates', emailTemplateRoutes);
 
 // Placeholder routes for other modules (to be implemented)
 // app.use('/api/invoices', invoiceRoutes);
@@ -115,6 +139,10 @@ const startServer = async () => {
 
     // Sync database models (in development only)
     if (process.env.NODE_ENV === 'development' && process.env.DB_SYNC === 'true') {
+      // Sync Company table first to resolve circular FK: users.company_id → companies, companies.owner_id → users
+      const { Company, Invitation } = require('./models');
+      await Company.sync({ alter: true });
+      await Invitation.sync({ alter: true });
       await sequelize.sync({ alter: true });
       logger.info('Database models synchronized');
     }

@@ -31,6 +31,12 @@ exports.getAllLeaves = async (req, res, next) => {
 
     // Non-admin users can only see their own leaves or their team's leaves
     if (req.user.role === 'staff') {
+      if (!req.user.employee_id) {
+        return res.status(200).json({
+          success: true,
+          data: { leaves: [], pagination: { total: 0, currentPage: 1, limit: parseInt(limit), totalPages: 0 } }
+        });
+      }
       where.employee_id = req.user.employee_id;
     }
 
@@ -40,7 +46,9 @@ exports.getAllLeaves = async (req, res, next) => {
         {
           model: Employee,
           as: 'employee',
-          attributes: ['id', 'employee_id', 'full_name', 'department', 'position']
+          attributes: ['id', 'employee_id', 'full_name', 'department', 'position'],
+          where: { company_id: req.user.company_id },
+          required: true
         },
         {
           model: LeaveType,
@@ -55,7 +63,8 @@ exports.getAllLeaves = async (req, res, next) => {
       ],
       limit: parseInt(limit),
       offset: offset,
-      order: [['created_at', 'DESC']]
+      order: [['created_at', 'DESC']],
+      distinct: true
     });
 
     logger.info(`Retrieved ${rows.length} leave applications`, {
@@ -93,7 +102,9 @@ exports.getLeaveById = async (req, res, next) => {
         {
           model: Employee,
           as: 'employee',
-          attributes: ['id', 'employee_id', 'full_name', 'department', 'position', 'reporting_manager_id']
+          attributes: ['id', 'employee_id', 'full_name', 'department', 'position', 'reporting_manager_id'],
+          where: { company_id: req.user.company_id },
+          required: true
         },
         {
           model: LeaveType,
@@ -161,8 +172,10 @@ exports.applyLeave = async (req, res, next) => {
       });
     }
 
-    // Validate employee exists
-    const employee = await Employee.findByPk(employee_id);
+    // Validate employee exists and belongs to active company
+    const employee = await Employee.findOne({
+      where: { id: employee_id, company_id: req.user.company_id }
+    });
     if (!employee) {
       await transaction.rollback();
       return res.status(404).json({
@@ -324,7 +337,9 @@ exports.updateLeave = async (req, res, next) => {
       include: [
         {
           model: Employee,
-          as: 'employee'
+          as: 'employee',
+          where: { company_id: req.user.company_id },
+          required: true
         },
         {
           model: LeaveType,
@@ -461,7 +476,9 @@ exports.approveRejectLeave = async (req, res, next) => {
       include: [
         {
           model: Employee,
-          as: 'employee'
+          as: 'employee',
+          where: { company_id: req.user.company_id },
+          required: true
         },
         {
           model: LeaveType,
@@ -600,7 +617,10 @@ exports.cancelLeave = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const leave = await Leave.findByPk(id);
+    const leave = await Leave.findOne({
+      where: { id },
+      include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
+    });
 
     if (!leave) {
       await transaction.rollback();
@@ -692,7 +712,8 @@ exports.getLeaveBalance = async (req, res, next) => {
       });
     }
 
-    const employee = await Employee.findByPk(employee_id, {
+    const employee = await Employee.findOne({
+      where: { id: employee_id, company_id: req.user.company_id },
       attributes: ['id', 'employee_id', 'full_name']
     });
 

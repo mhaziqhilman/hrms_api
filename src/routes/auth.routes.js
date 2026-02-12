@@ -118,4 +118,25 @@ router.post(
   authController.changePassword
 );
 
+/**
+ * @route   POST /api/auth/verify-email
+ * @desc    Verify email address
+ * @access  Public
+ */
+router.post(
+  '/verify-email',
+  [
+    body('token').notEmpty().withMessage('Verification token is required'),
+    validate
+  ],
+  authController.verifyEmail
+);
+
+/**
+ * @route   POST /api/auth/resend-verification
+ * @desc    Resend verification email
+ * @access  Private
+ */
+router.post('/resend-verification', verifyToken, authController.resendVerification);
+
 module.exports = router;

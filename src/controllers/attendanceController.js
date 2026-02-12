@@ -24,8 +24,10 @@ exports.clockIn = async (req, res, next) => {
       });
     }
 
-    // Validate employee exists
-    const employee = await Employee.findByPk(employee_id);
+    // Validate employee exists and belongs to active company
+    const employee = await Employee.findOne({
+      where: { id: employee_id, company_id: req.user.company_id }
+    });
     if (!employee) {
       return res.status(404).json({
         success: false,
@@ -236,6 +238,12 @@ exports.getAllAttendance = async (req, res, next) => {
 
     // Staff can only view their own attendance
     if (req.user.role === 'staff') {
+      if (!req.user.employee_id) {
+        return res.status(200).json({
+          success: true,
+          data: { attendance: [], pagination: { total: 0, currentPage: 1, limit: parseInt(limit), totalPages: 0 } }
+        });
+      }
       where.employee_id = req.user.employee_id;
     }
 
@@ -245,12 +253,15 @@ exports.getAllAttendance = async (req, res, next) => {
         {
           model: Employee,
           as: 'employee',
-          attributes: ['id', 'employee_id', 'full_name', 'department', 'position']
+          attributes: ['id', 'employee_id', 'full_name', 'department', 'position'],
+          where: { company_id: req.user.company_id },
+          required: true
         }
       ],
       limit: parseInt(limit),
       offset: offset,
-      order: [['date', 'DESC'], ['clock_in_time', 'DESC']]
+      order: [['date', 'DESC'], ['clock_in_time', 'DESC']],
+      distinct: true
     });
 
     logger.info(`Retrieved ${rows.length} attendance records`, {
@@ -288,7 +299,9 @@ exports.getAttendanceById = async (req, res, next) => {
         {
           model: Employee,
           as: 'employee',
-          attributes: ['id', 'employee_id', 'full_name', 'department', 'position']
+          attributes: ['id', 'employee_id', 'full_name', 'department', 'position'],
+          where: { company_id: req.user.company_id },
+          required: true
         }
       ]
     });
@@ -333,7 +346,10 @@ exports.updateAttendance = async (req, res, next) => {
       remarks
     } = req.body;
 
-    const attendance = await Attendance.findByPk(id);
+    const attendance = await Attendance.findOne({
+      where: { id },
+      include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
+    });
 
     if (!attendance) {
       return res.status(404).json({
@@ -382,7 +398,10 @@ exports.deleteAttendance = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const attendance = await Attendance.findByPk(id);
+    const attendance = await Attendance.findOne({
+      where: { id },
+      include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
+    });
 
     if (!attendance) {
       return res.status(404).json({
@@ -424,8 +443,10 @@ exports.applyWFH = async (req, res, next) => {
       });
     }
 
-    // Validate employee exists
-    const employee = await Employee.findByPk(employee_id);
+    // Validate employee exists and belongs to active company
+    const employee = await Employee.findOne({
+      where: { id: employee_id, company_id: req.user.company_id }
+    });
     if (!employee) {
       return res.status(404).json({
         success: false,
@@ -511,6 +532,12 @@ exports.getAllWFH = async (req, res, next) => {
 
     // Staff can only view their own WFH applications
     if (req.user.role === 'staff') {
+      if (!req.user.employee_id) {
+        return res.status(200).json({
+          success: true,
+          data: { wfh_applications: [], pagination: { total: 0, currentPage: 1, limit: parseInt(limit), totalPages: 0 } }
+        });
+      }
       where.employee_id = req.user.employee_id;
     }
 
@@ -520,7 +547,9 @@ exports.getAllWFH = async (req, res, next) => {
         {
           model: Employee,
           as: 'employee',
-          attributes: ['id', 'employee_id', 'full_name', 'department', 'position']
+          attributes: ['id', 'employee_id', 'full_name', 'department', 'position'],
+          where: { company_id: req.user.company_id },
+          required: true
         },
         {
           model: User,
@@ -530,7 +559,8 @@ exports.getAllWFH = async (req, res, next) => {
       ],
       limit: parseInt(limit),
       offset: offset,
-      order: [['date', 'DESC']]
+      order: [['date', 'DESC']],
+      distinct: true
     });
 
     logger.info(`Retrieved ${rows.length} WFH applications`, {
@@ -564,7 +594,10 @@ exports.approveRejectWFH = async (req, res, next) => {
     const { id } = req.params;
     const { action, rejection_reason } = req.body; // action: 'approve' or 'reject'
 
-    const wfhApplication = await WFHApplication.findByPk(id);
+    const wfhApplication = await WFHApplication.findOne({
+      where: { id },
+      include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
+    });
 
     if (!wfhApplication) {
       return res.status(404).json({
@@ -663,7 +696,8 @@ exports.getAttendanceSummary = async (req, res, next) => {
       });
     }
 
-    const employee = await Employee.findByPk(employee_id, {
+    const employee = await Employee.findOne({
+      where: { id: employee_id, company_id: req.user.company_id },
       attributes: ['id', 'employee_id', 'full_name', 'department']
     });
 

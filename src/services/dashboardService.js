@@ -28,9 +28,9 @@ const getTodayString = () => {
 };
 
 /**
- * Admin Dashboard - Organization-wide overview
+ * Admin Dashboard - Organization-wide overview (scoped to company)
  */
-const getAdminDashboard = async () => {
+const getAdminDashboard = async (companyId) => {
   const today = getTodayString();
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -38,8 +38,8 @@ const getAdminDashboard = async () => {
   const firstOfMonth = `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`;
 
   // 1. Employee stats
-  const totalEmployees = await Employee.count();
-  const activeEmployees = await Employee.count({ where: { employment_status: 'Active' } });
+  const totalEmployees = await Employee.count({ where: { company_id: companyId } });
+  const activeEmployees = await Employee.count({ where: { company_id: companyId, employment_status: 'Active' } });
 
   // On leave today
   const onLeaveToday = await Leave.count({
@@ -47,12 +47,14 @@ const getAdminDashboard = async () => {
       status: 'Approved',
       start_date: { [Op.lte]: today },
       end_date: { [Op.gte]: today }
-    }
+    },
+    include: [{ model: Employee, as: 'employee', where: { company_id: companyId }, attributes: [], required: true }]
   });
 
   // New hires this month
   const newHires = await Employee.count({
     where: {
+      company_id: companyId,
       join_date: { [Op.gte]: firstOfMonth },
       employment_status: 'Active'
     }
@@ -61,6 +63,7 @@ const getAdminDashboard = async () => {
   // 2. Attendance summary for today
   const attendanceToday = await Attendance.findAll({
     where: { date: today },
+    include: [{ model: Employee, as: 'employee', where: { company_id: companyId }, attributes: [], required: true }],
     raw: true
   });
 
@@ -75,7 +78,7 @@ const getAdminDashboard = async () => {
   // 3. Payroll summary for current month
   const payrollSummary = await Payroll.findOne({
     attributes: [
-      [fn('COUNT', col('id')), 'total_count'],
+      [fn('COUNT', col('Payroll.id')), 'total_count'],
       [fn('SUM', col('gross_salary')), 'total_gross'],
       [fn('SUM', literal('epf_employee + socso_employee + eis_employee')), 'total_statutory'],
       [fn('SUM', col('pcb_deduction')), 'total_pcb'],
@@ -86,6 +89,7 @@ const getAdminDashboard = async () => {
       month: currentMonth,
       status: { [Op.in]: ['Approved', 'Paid'] }
     },
+    include: [{ model: Employee, as: 'employee', where: { company_id: companyId }, attributes: [], required: true }],
     raw: true
   });
 
@@ -93,6 +97,7 @@ const getAdminDashboard = async () => {
   const payrollStatusCheck = await Payroll.findOne({
     attributes: ['status'],
     where: { year: currentYear, month: currentMonth },
+    include: [{ model: Employee, as: 'employee', where: { company_id: companyId }, attributes: [], required: true }],
     order: [['updated_at', 'DESC']],
     raw: true
   });
@@ -105,7 +110,7 @@ const getAdminDashboard = async () => {
       status: { [Op.in]: ['Finance_Approved', 'Manager_Approved'] }
     },
     include: [
-      { model: Employee, as: 'employee', attributes: ['full_name'] },
+      { model: Employee, as: 'employee', where: { company_id: companyId }, attributes: ['full_name'], required: true },
       { model: ClaimType, as: 'claimType', attributes: ['name'] }
     ],
     order: [['date', 'DESC']],
@@ -117,7 +122,7 @@ const getAdminDashboard = async () => {
   const recentLeaveRequests = await Leave.findAll({
     where: { status: 'Pending' },
     include: [
-      { model: Employee, as: 'employee', attributes: ['full_name'] },
+      { model: Employee, as: 'employee', where: { company_id: companyId }, attributes: ['full_name'], required: true },
       { model: LeaveType, as: 'leave_type', attributes: ['name'] }
     ],
     order: [['created_at', 'DESC']],
@@ -131,6 +136,7 @@ const getAdminDashboard = async () => {
   // Check latest payroll activity
   const lastPayroll = await Payroll.findOne({
     where: { status: { [Op.in]: ['Approved', 'Paid'] } },
+    include: [{ model: Employee, as: 'employee', where: { company_id: companyId }, attributes: [], required: true }],
     order: [['updated_at', 'DESC']],
     raw: true
   });
@@ -148,7 +154,8 @@ const getAdminDashboard = async () => {
   const recentLeaveCount = await Leave.count({
     where: {
       created_at: { [Op.gte]: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
-    }
+    },
+    include: [{ model: Employee, as: 'employee', where: { company_id: companyId }, attributes: [], required: true }]
   });
   if (recentLeaveCount > 0) {
     recentActivities.push({
@@ -164,7 +171,8 @@ const getAdminDashboard = async () => {
     where: {
       status: { [Op.in]: ['Manager_Approved', 'Finance_Approved', 'Paid'] },
       updated_at: { [Op.gte]: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
-    }
+    },
+    include: [{ model: Employee, as: 'employee', where: { company_id: companyId }, attributes: [], required: true }]
   });
   if (recentClaimsApproved > 0) {
     recentActivities.push({
@@ -178,6 +186,7 @@ const getAdminDashboard = async () => {
   // Recent new employees
   const recentNewEmployees = await Employee.count({
     where: {
+      company_id: companyId,
       created_at: { [Op.gte]: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
     }
   });
@@ -237,14 +246,14 @@ const getAdminDashboard = async () => {
 
 
 /**
- * Manager Dashboard - Team-specific overview
+ * Manager Dashboard - Team-specific overview (scoped to company)
  */
-const getManagerDashboard = async (userId) => {
+const getManagerDashboard = async (companyId, userId) => {
   const today = getTodayString();
 
   // Get the manager's employee record
   const managerEmployee = await Employee.findOne({
-    where: { user_id: userId },
+    where: { user_id: userId, company_id: companyId },
     raw: true
   });
 
@@ -256,6 +265,7 @@ const getManagerDashboard = async (userId) => {
   // Get team members (employees reporting to this manager)
   const teamMembers = await Employee.findAll({
     where: {
+      company_id: companyId,
       reporting_manager_id: managerEmployee.id,
       employment_status: 'Active'
     },
@@ -273,6 +283,7 @@ const getManagerDashboard = async (userId) => {
   if (totalMembers === 0 && managerEmployee.department) {
     const deptMembers = await Employee.findAll({
       where: {
+        company_id: companyId,
         department: managerEmployee.department,
         employment_status: 'Active',
         id: { [Op.ne]: managerEmployee.id }
@@ -450,16 +461,16 @@ const getEmptyManagerDashboard = () => ({
 
 
 /**
- * Staff Dashboard - Personal overview
+ * Staff Dashboard - Personal overview (scoped to company)
  */
-const getStaffDashboard = async (userId) => {
+const getStaffDashboard = async (companyId, userId) => {
   const today = getTodayString();
   const now = new Date();
   const currentYear = now.getFullYear();
 
   // Get employee record for this user
   const employee = await Employee.findOne({
-    where: { user_id: userId },
+    where: { user_id: userId, company_id: companyId },
     raw: true
   });
 

@@ -18,6 +18,7 @@ exports.getPayrollCostAnalytics = async (req, res, next) => {
     }
 
     const data = await analyticsService.getPayrollCostAnalytics(
+      req.user.company_id,
       parseInt(year),
       parseInt(start_month),
       parseInt(end_month)
@@ -53,7 +54,7 @@ exports.getLeaveUtilizationAnalytics = async (req, res, next) => {
       });
     }
 
-    const data = await analyticsService.getLeaveUtilizationAnalytics(parseInt(year));
+    const data = await analyticsService.getLeaveUtilizationAnalytics(req.user.company_id, parseInt(year));
 
     logger.info(`Leave utilization analytics retrieved for ${year}`, {
       user_id: req.user.id,
@@ -85,6 +86,7 @@ exports.getAttendancePunctualityAnalytics = async (req, res, next) => {
     }
 
     const data = await analyticsService.getAttendancePunctualityAnalytics(
+      req.user.company_id,
       parseInt(year),
       month ? parseInt(month) : null
     );
@@ -119,7 +121,7 @@ exports.getClaimsSpendingAnalytics = async (req, res, next) => {
       });
     }
 
-    const data = await analyticsService.getClaimsSpendingAnalytics(parseInt(year));
+    const data = await analyticsService.getClaimsSpendingAnalytics(req.user.company_id, parseInt(year));
 
     logger.info(`Claims spending analytics retrieved for ${year}`, {
       user_id: req.user.id,
@@ -150,7 +152,7 @@ exports.getDashboardSummary = async (req, res, next) => {
       });
     }
 
-    const data = await analyticsService.getDashboardSummary(parseInt(year), parseInt(month));
+    const data = await analyticsService.getDashboardSummary(req.user.company_id, parseInt(year), parseInt(month));
 
     logger.info(`Dashboard summary retrieved for ${year}/${month}`, {
       user_id: req.user.id,
@@ -190,20 +192,22 @@ exports.exportAnalyticsExcel = async (req, res, next) => {
       });
     }
 
+    const companyId = req.user.company_id;
     let data;
     let filename;
 
     switch (type) {
       case 'payroll':
-        data = await analyticsService.getPayrollCostAnalytics(parseInt(year));
+        data = await analyticsService.getPayrollCostAnalytics(companyId, parseInt(year));
         filename = `Payroll_Analytics_${year}.xlsx`;
         break;
       case 'leave':
-        data = await analyticsService.getLeaveUtilizationAnalytics(parseInt(year));
+        data = await analyticsService.getLeaveUtilizationAnalytics(companyId, parseInt(year));
         filename = `Leave_Analytics_${year}.xlsx`;
         break;
       case 'attendance':
         data = await analyticsService.getAttendancePunctualityAnalytics(
+          companyId,
           parseInt(year),
           month ? parseInt(month) : null
         );
@@ -212,7 +216,7 @@ exports.exportAnalyticsExcel = async (req, res, next) => {
           : `Attendance_Analytics_${year}.xlsx`;
         break;
       case 'claims':
-        data = await analyticsService.getClaimsSpendingAnalytics(parseInt(year));
+        data = await analyticsService.getClaimsSpendingAnalytics(companyId, parseInt(year));
         filename = `Claims_Analytics_${year}.xlsx`;
         break;
     }
@@ -257,20 +261,22 @@ exports.exportAnalyticsPDF = async (req, res, next) => {
       });
     }
 
+    const companyId = req.user.company_id;
     let data;
     let filename;
 
     switch (type) {
       case 'payroll':
-        data = await analyticsService.getPayrollCostAnalytics(parseInt(year));
+        data = await analyticsService.getPayrollCostAnalytics(companyId, parseInt(year));
         filename = `Payroll_Analytics_${year}.pdf`;
         break;
       case 'leave':
-        data = await analyticsService.getLeaveUtilizationAnalytics(parseInt(year));
+        data = await analyticsService.getLeaveUtilizationAnalytics(companyId, parseInt(year));
         filename = `Leave_Analytics_${year}.pdf`;
         break;
       case 'attendance':
         data = await analyticsService.getAttendancePunctualityAnalytics(
+          companyId,
           parseInt(year),
           month ? parseInt(month) : null
         );
@@ -279,7 +285,7 @@ exports.exportAnalyticsPDF = async (req, res, next) => {
           : `Attendance_Analytics_${year}.pdf`;
         break;
       case 'claims':
-        data = await analyticsService.getClaimsSpendingAnalytics(parseInt(year));
+        data = await analyticsService.getClaimsSpendingAnalytics(companyId, parseInt(year));
         filename = `Claims_Analytics_${year}.pdf`;
         break;
     }

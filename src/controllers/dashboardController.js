@@ -8,7 +8,7 @@ const logger = require('../utils/logger');
  */
 exports.getAdminDashboard = async (req, res, next) => {
   try {
-    const data = await dashboardService.getAdminDashboard();
+    const data = await dashboardService.getAdminDashboard(req.user.company_id);
 
     logger.info('Admin dashboard data retrieved', { user_id: req.user.id });
 
@@ -29,7 +29,7 @@ exports.getAdminDashboard = async (req, res, next) => {
  */
 exports.getManagerDashboard = async (req, res, next) => {
   try {
-    const data = await dashboardService.getManagerDashboard(req.user.id);
+    const data = await dashboardService.getManagerDashboard(req.user.company_id, req.user.id);
 
     logger.info('Manager dashboard data retrieved', { user_id: req.user.id });
 
@@ -50,7 +50,7 @@ exports.getManagerDashboard = async (req, res, next) => {
  */
 exports.getStaffDashboard = async (req, res, next) => {
   try {
-    const data = await dashboardService.getStaffDashboard(req.user.id);
+    const data = await dashboardService.getStaffDashboard(req.user.company_id, req.user.id);
 
     logger.info('Staff dashboard data retrieved', { user_id: req.user.id });
 

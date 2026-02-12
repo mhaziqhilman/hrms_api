@@ -49,6 +49,26 @@ const User = sequelize.define('User', {
     type: DataTypes.STRING(100),
     allowNull: true,
     field: 'remember_token'
+  },
+  company_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    field: 'company_id'
+  },
+  email_verified: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    field: 'email_verified'
+  },
+  email_verification_token: {
+    type: DataTypes.STRING(255),
+    allowNull: true,
+    field: 'email_verification_token'
+  },
+  email_verification_expires: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    field: 'email_verification_expires'
   }
 }, {
   tableName: 'users',

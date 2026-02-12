@@ -1,14 +1,28 @@
 const userManagementService = require('../services/userManagementService');
+const { User } = require('../models');
 const logger = require('../utils/logger');
 
 /**
  * GET /api/users
  * Get all users with pagination
+ * Super admin: sees all users (optional company_id filter from query)
+ * Admin: sees only their company's users (enforced)
  */
 const getUsers = async (req, res) => {
   try {
-    const { page, limit, search, role, is_active } = req.query;
-    const result = await userManagementService.getUsers({ page, limit, search, role, is_active });
+    const { page, limit, search, role, is_active, company_id } = req.query;
+    const isSuperAdmin = req.user.role === 'super_admin';
+
+    // Super admin: optional company filter from query params
+    // Admin: always enforced to their company
+    const effectiveCompanyId = isSuperAdmin
+      ? (company_id || null)
+      : req.user.company_id;
+
+    const result = await userManagementService.getUsers({
+      page, limit, search, role, is_active,
+      company_id: effectiveCompanyId
+    });
 
     res.json({
       success: true,
@@ -25,11 +39,28 @@ const getUsers = async (req, res) => {
 };
 
 /**
+ * Helper: verify admin can access a target user (must be in same company)
+ * Super admin can access any user.
+ */
+const verifyAdminAccess = async (req, targetUserId) => {
+  if (req.user.role === 'super_admin') return true;
+  const targetUser = await User.findByPk(targetUserId, { attributes: ['id', 'company_id'] });
+  if (!targetUser) return true; // let the service throw 'not found'
+  if (targetUser.company_id !== req.user.company_id) {
+    return false;
+  }
+  return true;
+};
+
+/**
  * GET /api/users/:id
  * Get single user by ID
  */
 const getUserById = async (req, res) => {
   try {
+    if (!(await verifyAdminAccess(req, req.params.id))) {
+      return res.status(403).json({ success: false, message: 'Access denied. User is not in your company.' });
+    }
     const user = await userManagementService.getUserById(req.params.id);
 
     res.json({
@@ -76,6 +107,9 @@ const updateUserRole = async (req, res) => {
  */
 const toggleUserActive = async (req, res) => {
   try {
+    if (!(await verifyAdminAccess(req, req.params.id))) {
+      return res.status(403).json({ success: false, message: 'Access denied. User is not in your company.' });
+    }
     const { is_active } = req.body;
     const user = await userManagementService.toggleUserActive(req.params.id, is_active);
 
@@ -100,6 +134,9 @@ const toggleUserActive = async (req, res) => {
  */
 const linkUserToEmployee = async (req, res) => {
   try {
+    if (!(await verifyAdminAccess(req, req.params.id))) {
+      return res.status(403).json({ success: false, message: 'Access denied. User is not in your company.' });
+    }
     const { employee_id } = req.body;
     const user = await userManagementService.linkUserToEmployee(req.params.id, employee_id);
 
@@ -124,6 +161,9 @@ const linkUserToEmployee = async (req, res) => {
  */
 const unlinkUserFromEmployee = async (req, res) => {
   try {
+    if (!(await verifyAdminAccess(req, req.params.id))) {
+      return res.status(403).json({ success: false, message: 'Access denied. User is not in your company.' });
+    }
     const user = await userManagementService.unlinkUserFromEmployee(req.params.id);
 
     res.json({
@@ -147,7 +187,7 @@ const unlinkUserFromEmployee = async (req, res) => {
  */
 const getUnlinkedEmployees = async (req, res) => {
   try {
-    const employees = await userManagementService.getUnlinkedEmployees();
+    const employees = await userManagementService.getUnlinkedEmployees(req.user.company_id);
 
     res.json({
       success: true,
@@ -169,6 +209,9 @@ const getUnlinkedEmployees = async (req, res) => {
  */
 const resetUserPassword = async (req, res) => {
   try {
+    if (!(await verifyAdminAccess(req, req.params.id))) {
+      return res.status(403).json({ success: false, message: 'Access denied. User is not in your company.' });
+    }
     const { password } = req.body;
     if (!password || password.length < 8) {
       return res.status(400).json({

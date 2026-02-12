@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"/mnt/c/Program Files/nodejs/node.exe\" -e \"\nconst XLSX = require\\(''xlsx''\\);\nconst wb = XLSX.readFile\\(''docs/data/Full_Details_Staff.xlsx''\\);\nconsole.log\\(''Sheet names:'', wb.SheetNames\\);\nconst ws = wb.Sheets[wb.SheetNames[0]];\nconst data = XLSX.utils.sheet_to_json\\(ws, { defval: '''' }\\);\nconsole.log\\(''Total rows:'', data.length\\);\nconsole.log\\(''Column headers:'', JSON.stringify\\(Object.keys\\(data[0]\\), null, 2\\)\\);\nconsole.log\\(''---SAMPLE---''\\);\ndata.slice\\(0, 3\\).forEach\\(\\(row, i\\) => {\n  console.log\\(''Row '' + \\(i+1\\) + '':'', JSON.stringify\\(row, null, 2\\)\\);\n}\\);\n\")",
+      "Bash(\"/mnt/c/Program Files/nodejs/node.exe\" -e:*)",
+      "Bash(node:*)"
+    ]
+  }
+}

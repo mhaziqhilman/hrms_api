@@ -9,8 +9,10 @@ exports.submitClaim = async (req, res) => {
   try {
     const { employee_id, claim_type_id, date, amount, description, receipt_url } = req.body;
 
-    // Verify employee exists
-    const employee = await Employee.findByPk(employee_id);
+    // Verify employee exists and belongs to active company
+    const employee = await Employee.findOne({
+      where: { id: employee_id, company_id: req.user.company_id }
+    });
     if (!employee) {
       return res.status(404).json({
         success: false,
@@ -102,9 +104,9 @@ exports.getAllClaims = async (req, res) => {
       // Staff can only see their own claims
       const employee = await Employee.findOne({ where: { user_id: req.user.id } });
       if (!employee) {
-        return res.status(404).json({
-          success: false,
-          message: 'Employee profile not found'
+        return res.status(200).json({
+          success: true,
+          data: { claims: [], pagination: { total: 0, currentPage: 1, limit: parseInt(limit), totalPages: 0 } }
         });
       }
       whereClause.employee_id = employee.id;
@@ -127,7 +129,9 @@ exports.getAllClaims = async (req, res) => {
         {
           model: Employee,
           as: 'employee',
-          attributes: ['id', 'full_name', 'employee_id', 'department', 'position']
+          attributes: ['id', 'full_name', 'employee_id', 'department', 'position'],
+          where: { company_id: req.user.company_id },
+          required: true
         },
         {
           model: ClaimType,
@@ -147,7 +151,8 @@ exports.getAllClaims = async (req, res) => {
       ],
       limit: parseInt(limit),
       offset: offset,
-      order: [['date', 'DESC'], ['created_at', 'DESC']]
+      order: [['date', 'DESC'], ['created_at', 'DESC']],
+      distinct: true
     });
 
     res.json({
@@ -180,7 +185,9 @@ exports.getClaimById = async (req, res) => {
         {
           model: Employee,
           as: 'employee',
-          attributes: ['id', 'full_name', 'employee_id', 'department', 'position']
+          attributes: ['id', 'full_name', 'employee_id', 'department', 'position'],
+          where: { company_id: req.user.company_id },
+          required: true
         },
         {
           model: ClaimType,
@@ -238,7 +245,10 @@ exports.updateClaim = async (req, res) => {
     const { id } = req.params;
     const { claim_type_id, date, amount, description, receipt_url } = req.body;
 
-    const claim = await Claim.findByPk(id);
+    const claim = await Claim.findOne({
+      where: { id },
+      include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
+    });
     if (!claim) {
       return res.status(404).json({
         success: false,
@@ -311,7 +321,10 @@ exports.managerApproval = async (req, res) => {
     const { id } = req.params;
     const { action, rejection_reason } = req.body; // action: 'approve' or 'reject'
 
-    const claim = await Claim.findByPk(id);
+    const claim = await Claim.findOne({
+      where: { id },
+      include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
+    });
     if (!claim) {
       return res.status(404).json({
         success: false,
@@ -395,7 +408,10 @@ exports.financeApproval = async (req, res) => {
     const { action, rejection_reason, payment_reference } = req.body;
     // action: 'approve', 'reject', or 'paid'
 
-    const claim = await Claim.findByPk(id);
+    const claim = await Claim.findOne({
+      where: { id },
+      include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
+    });
     if (!claim) {
       return res.status(404).json({
         success: false,
@@ -502,7 +518,10 @@ exports.deleteClaim = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const claim = await Claim.findByPk(id);
+    const claim = await Claim.findOne({
+      where: { id },
+      include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
+    });
     if (!claim) {
       return res.status(404).json({
         success: false,
@@ -561,8 +580,10 @@ exports.getClaimsSummary = async (req, res) => {
       }
     }
 
-    // Verify employee exists
-    const employee = await Employee.findByPk(employee_id);
+    // Verify employee exists and belongs to active company
+    const employee = await Employee.findOne({
+      where: { id: employee_id, company_id: req.user.company_id }
+    });
     if (!employee) {
       return res.status(404).json({
         success: false,

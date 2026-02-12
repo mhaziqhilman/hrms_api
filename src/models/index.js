@@ -1,6 +1,9 @@
 const { sequelize } = require('../config/database');
 const User = require('./User');
 const Employee = require('./Employee');
+const Company = require('./Company');
+const Invitation = require('./Invitation');
+const UserCompany = require('./UserCompany');
 const YTDStatutory = require('./YTDStatutory');
 const Payroll = require('./Payroll');
 const LeaveType = require('./LeaveType');
@@ -16,13 +19,48 @@ const MemoReadReceipt = require('./MemoReadReceipt');
 const Policy = require('./Policy');
 const PolicyAcknowledgment = require('./PolicyAcknowledgment');
 const UserSettings = require('./UserSettings');
+const PublicHoliday = require('./PublicHoliday');
+const StatutoryConfig = require('./StatutoryConfig');
+const EmailTemplate = require('./EmailTemplate');
 
 // Define associations
 
-// Employee - User (One-to-One)
-// In the database schema, employees table has user_id (not users having employee_id)
+// Company - User (One-to-Many)
+Company.hasMany(User, { foreignKey: 'company_id', as: 'users' });
+User.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+// Company - Employee (One-to-Many)
+Company.hasMany(Employee, { foreignKey: 'company_id', as: 'employees' });
+Employee.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+// Company owner
+Company.belongsTo(User, { foreignKey: 'owner_id', as: 'owner' });
+User.hasOne(Company, { foreignKey: 'owner_id', as: 'owned_company' });
+
+// Company - Invitation (One-to-Many)
+Company.hasMany(Invitation, { foreignKey: 'company_id', as: 'invitations' });
+Invitation.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+// User - Invitation (invited_by)
+User.hasMany(Invitation, { foreignKey: 'invited_by', as: 'sent_invitations' });
+Invitation.belongsTo(User, { foreignKey: 'invited_by', as: 'inviter' });
+
+// Employee - User
+// hasOne 'employee' kept for backward compatibility (returns active company's employee)
+// hasMany 'employees' added for multi-company queries
 Employee.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 User.hasOne(Employee, { foreignKey: 'user_id', as: 'employee' });
+User.hasMany(Employee, { foreignKey: 'user_id', as: 'employees' });
+
+// User - Company (Many-to-Many via UserCompany)
+User.belongsToMany(Company, { through: UserCompany, as: 'joined_companies', foreignKey: 'user_id', otherKey: 'company_id' });
+Company.belongsToMany(User, { through: UserCompany, as: 'members', foreignKey: 'company_id', otherKey: 'user_id' });
+
+// UserCompany direct associations
+User.hasMany(UserCompany, { foreignKey: 'user_id', as: 'company_memberships' });
+UserCompany.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+UserCompany.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+UserCompany.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
 
 // Employee - YTDStatutory (One-to-Many)
 Employee.hasMany(YTDStatutory, { foreignKey: 'employee_id', as: 'ytd_records' });
@@ -142,6 +180,22 @@ PolicyAcknowledgment.belongsTo(Employee, { foreignKey: 'employee_id', as: 'emplo
 User.hasOne(UserSettings, { foreignKey: 'user_id', as: 'settings' });
 UserSettings.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
+// Company - PublicHoliday (One-to-Many)
+Company.hasMany(PublicHoliday, { foreignKey: 'company_id', as: 'public_holidays' });
+PublicHoliday.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+// Company - StatutoryConfig (One-to-Many)
+Company.hasMany(StatutoryConfig, { foreignKey: 'company_id', as: 'statutory_configs' });
+StatutoryConfig.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+// Company - EmailTemplate (One-to-Many)
+Company.hasMany(EmailTemplate, { foreignKey: 'company_id', as: 'email_templates' });
+EmailTemplate.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+// Company - LeaveType (One-to-Many)
+Company.hasMany(LeaveType, { foreignKey: 'company_id', as: 'leave_types' });
+LeaveType.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
 // Sync database
 const syncDatabase = async (options = {}) => {
   try {
@@ -157,6 +211,9 @@ module.exports = {
   sequelize,
   User,
   Employee,
+  Company,
+  Invitation,
+  UserCompany,
   YTDStatutory,
   Payroll,
   LeaveType,
@@ -172,5 +229,8 @@ module.exports = {
   Policy,
   PolicyAcknowledgment,
   UserSettings,
+  PublicHoliday,
+  StatutoryConfig,
+  EmailTemplate,
   syncDatabase
 };

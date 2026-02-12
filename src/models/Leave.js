@@ -34,7 +34,6 @@ const Leave = sequelize.define('Leave', {
   total_days: {
     type: DataTypes.DECIMAL(5, 2),
     allowNull: false,
-    comment: 'Supports half-day leaves (0.5)'
   },
   is_half_day: {
     type: DataTypes.BOOLEAN,
@@ -51,7 +50,7 @@ const Leave = sequelize.define('Leave', {
   attachment_url: {
     type: DataTypes.STRING(255),
     allowNull: true,
-    comment: 'URL for medical certificate or supporting documents'
+    _comment: 'URL for medical certificate or supporting documents'
   },
   status: {
     type: DataTypes.ENUM('Pending', 'Approved', 'Rejected', 'Cancelled'),

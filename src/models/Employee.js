@@ -10,7 +10,6 @@ const Employee = sequelize.define('Employee', {
   user_id: {
     type: DataTypes.INTEGER,
     allowNull: true,
-    unique: true,
     references: {
       model: 'users',
       key: 'id'
@@ -21,7 +20,6 @@ const Employee = sequelize.define('Employee', {
   employee_id: {
     type: DataTypes.STRING(20),
     allowNull: false,
-    unique: true,
     field: 'employee_id'
   },
   full_name: {
@@ -32,7 +30,6 @@ const Employee = sequelize.define('Employee', {
   ic_no: {
     type: DataTypes.STRING(20),
     allowNull: true,
-    unique: true,
     field: 'ic_no'
   },
   passport_no: {
@@ -182,8 +179,43 @@ const Employee = sequelize.define('Employee', {
   tax_category: {
     type: DataTypes.STRING(50),
     allowNull: true,
-    defaultValue: 'Individual',
+    defaultValue: 'KA',
     field: 'tax_category'
+  },
+  number_of_children: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    defaultValue: 0,
+    field: 'number_of_children'
+  },
+  children_in_higher_education: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    defaultValue: 0,
+    field: 'children_in_higher_education'
+  },
+  disabled_self: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true,
+    defaultValue: false,
+    field: 'disabled_self'
+  },
+  disabled_spouse: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true,
+    defaultValue: false,
+    field: 'disabled_spouse'
+  },
+  disabled_children: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    defaultValue: 0,
+    field: 'disabled_children'
+  },
+  company_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    field: 'company_id'
   },
   // Profile
   photo_url: {
@@ -195,7 +227,26 @@ const Employee = sequelize.define('Employee', {
   tableName: 'employees',
   timestamps: true,
   createdAt: 'created_at',
-  updatedAt: 'updated_at'
+  updatedAt: 'updated_at',
+  indexes: [
+    {
+      unique: true,
+      fields: ['user_id', 'company_id'],
+      name: 'unique_user_company_employee',
+      where: { user_id: { [require('sequelize').Op.ne]: null } }
+    },
+    {
+      unique: true,
+      fields: ['employee_id', 'company_id'],
+      name: 'unique_employee_id_company'
+    },
+    {
+      unique: true,
+      fields: ['ic_no', 'company_id'],
+      name: 'unique_ic_no_company',
+      where: { ic_no: { [require('sequelize').Op.ne]: null } }
+    }
+  ]
 });
 
 module.exports = Employee;

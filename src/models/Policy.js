@@ -11,8 +11,7 @@ const Policy = sequelize.define('Policy', {
     type: DataTypes.STRING(50),
     allowNull: false,
     unique: true,
-    field: 'policy_code',
-    comment: 'Unique policy identifier (e.g., HR-001, IT-005)'
+    field: 'policy_code'
   },
   title: {
     type: DataTypes.STRING(200),
@@ -20,31 +19,26 @@ const Policy = sequelize.define('Policy', {
   },
   description: {
     type: DataTypes.TEXT,
-    allowNull: true,
-    comment: 'Brief description of the policy'
+    allowNull: true
   },
   content: {
     type: DataTypes.TEXT('long'),
-    allowNull: false,
-    comment: 'Full policy content (can be HTML)'
+    allowNull: false
   },
   category: {
     type: DataTypes.ENUM('HR', 'IT', 'Finance', 'Safety', 'Compliance', 'Operations', 'Other'),
     allowNull: false,
-    defaultValue: 'Other',
-    comment: 'Policy category for organization'
+    defaultValue: 'Other'
   },
   version: {
     type: DataTypes.STRING(20),
     allowNull: false,
-    defaultValue: '1.0',
-    comment: 'Policy version number'
+    defaultValue: '1.0'
   },
   status: {
     type: DataTypes.ENUM('Draft', 'Active', 'Archived', 'Superseded'),
     defaultValue: 'Draft',
-    allowNull: false,
-    comment: 'Current status of the policy'
+    allowNull: false
   },
   author_id: {
     type: DataTypes.INTEGER,
@@ -53,8 +47,7 @@ const Policy = sequelize.define('Policy', {
       model: 'users',
       key: 'id'
     },
-    field: 'author_id',
-    comment: 'User who created the policy'
+    field: 'author_id'
   },
   approved_by: {
     type: DataTypes.INTEGER,
@@ -63,32 +56,27 @@ const Policy = sequelize.define('Policy', {
       model: 'users',
       key: 'id'
     },
-    field: 'approved_by',
-    comment: 'User who approved the policy'
+    field: 'approved_by'
   },
   approved_at: {
     type: DataTypes.DATE,
     allowNull: true,
-    field: 'approved_at',
-    comment: 'Timestamp when policy was approved'
+    field: 'approved_at'
   },
   effective_from: {
     type: DataTypes.DATEONLY,
     allowNull: true,
-    field: 'effective_from',
-    comment: 'Date when policy becomes effective'
+    field: 'effective_from'
   },
   review_date: {
     type: DataTypes.DATEONLY,
     allowNull: true,
-    field: 'review_date',
-    comment: 'Next scheduled review date'
+    field: 'review_date'
   },
   expires_at: {
     type: DataTypes.DATEONLY,
     allowNull: true,
-    field: 'expires_at',
-    comment: 'Optional expiry date for time-limited policies'
+    field: 'expires_at'
   },
   parent_policy_id: {
     type: DataTypes.INTEGER,
@@ -97,43 +85,36 @@ const Policy = sequelize.define('Policy', {
       model: 'policies',
       key: 'id'
     },
-    field: 'parent_policy_id',
-    comment: 'Reference to previous version if this is an update'
+    field: 'parent_policy_id'
   },
   requires_acknowledgment: {
     type: DataTypes.BOOLEAN,
     defaultValue: true,
-    field: 'requires_acknowledgment',
-    comment: 'Whether employees must acknowledge reading this policy'
+    field: 'requires_acknowledgment'
   },
   file_url: {
     type: DataTypes.STRING(500),
     allowNull: true,
-    field: 'file_url',
-    comment: 'URL to PDF or document file'
+    field: 'file_url'
   },
   file_size: {
     type: DataTypes.INTEGER,
     allowNull: true,
-    field: 'file_size',
-    comment: 'File size in bytes'
+    field: 'file_size'
   },
   view_count: {
     type: DataTypes.INTEGER,
     defaultValue: 0,
-    field: 'view_count',
-    comment: 'Total number of views'
+    field: 'view_count'
   },
   acknowledgment_count: {
     type: DataTypes.INTEGER,
     defaultValue: 0,
-    field: 'acknowledgment_count',
-    comment: 'Number of employees who acknowledged'
+    field: 'acknowledgment_count'
   },
   tags: {
     type: DataTypes.JSON,
-    allowNull: true,
-    comment: 'Array of tags for searching and filtering'
+    allowNull: true
   }
 }, {
   tableName: 'policies',

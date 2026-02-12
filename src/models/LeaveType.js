@@ -7,10 +7,21 @@ const LeaveType = sequelize.define('LeaveType', {
     primaryKey: true,
     autoIncrement: true
   },
+  company_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'companies',
+      key: 'id'
+    }
+  },
   name: {
     type: DataTypes.STRING(50),
-    allowNull: false,
-    unique: true
+    allowNull: false
+  },
+  is_active: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true
   },
   days_per_year: {
     type: DataTypes.INTEGER,
@@ -54,7 +65,13 @@ const LeaveType = sequelize.define('LeaveType', {
   tableName: 'leave_types',
   timestamps: true,
   createdAt: 'created_at',
-  updatedAt: 'updated_at'
+  updatedAt: 'updated_at',
+  indexes: [
+    {
+      unique: true,
+      fields: ['company_id', 'name']
+    }
+  ]
 });
 
 module.exports = LeaveType;

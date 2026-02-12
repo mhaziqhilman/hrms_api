@@ -22,7 +22,6 @@ const File = sequelize.define('File', {
   file_size: {
     type: DataTypes.BIGINT,
     allowNull: false,
-    comment: 'Size in bytes'
   },
   mime_type: {
     type: DataTypes.STRING(100),
@@ -49,14 +48,14 @@ const File = sequelize.define('File', {
   sub_category: {
     type: DataTypes.STRING(50),
     allowNull: true,
-    comment: 'e.g., resume, ic_copy, medical_receipt'
+    _comment: 'e.g., resume, ic_copy, medical_receipt'
   },
 
   // Associations
   uploaded_by: {
     type: DataTypes.INTEGER,
     allowNull: false,
-    comment: 'User ID'
+    _comment: 'User ID'
   },
   related_to_employee_id: {
     type: DataTypes.INTEGER,
@@ -87,17 +86,17 @@ const File = sequelize.define('File', {
   tags: {
     type: DataTypes.JSON,
     allowNull: true,
-    comment: 'Array of tags for searching'
+    _comment: 'Array of tags for searching'
   },
   is_public: {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
-    comment: 'Public access (e.g., company policies)'
+    _comment: 'Public access (e.g., company policies)'
   },
   is_verified: {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
-    comment: 'Admin verified document'
+    _comment: 'Admin verified document'
   },
 
   // Lifecycle

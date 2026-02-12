@@ -32,19 +32,19 @@ const MemoReadReceipt = sequelize.define('MemoReadReceipt', {
     allowNull: false,
     defaultValue: DataTypes.NOW,
     field: 'read_at',
-    comment: 'Timestamp when employee viewed the memo'
+    _comment: 'Timestamp when employee viewed the memo'
   },
   acknowledged_at: {
     type: DataTypes.DATE,
     allowNull: true,
     field: 'acknowledged_at',
-    comment: 'Timestamp when employee acknowledged the memo'
+    _comment: 'Timestamp when employee acknowledged the memo'
   },
   ip_address: {
     type: DataTypes.STRING(45),
     allowNull: true,
     field: 'ip_address',
-    comment: 'IP address for audit trail'
+    _comment: 'IP address for audit trail'
   }
 }, {
   tableName: 'memo_read_receipts',

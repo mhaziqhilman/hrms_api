@@ -40,6 +40,12 @@ exports.getAllPayroll = async (req, res, next) => {
       hasSearch = true;
     }
 
+    // Always filter by active company through employee
+    const employeeWhere = { company_id: req.user.company_id };
+    if (hasSearch) {
+      Object.assign(employeeWhere, includeWhere);
+    }
+
     const { count, rows } = await Payroll.findAndCountAll({
       where,
       limit: parseInt(limit),
@@ -50,8 +56,8 @@ exports.getAllPayroll = async (req, res, next) => {
           model: Employee,
           as: 'employee',
           attributes: ['id', 'employee_id', 'full_name', 'position', 'department'],
-          where: hasSearch ? includeWhere : undefined,
-          required: hasSearch // Use INNER JOIN when searching
+          where: employeeWhere,
+          required: true
         }
       ],
       distinct: true // Fix count when using INNER JOIN
@@ -92,7 +98,9 @@ exports.getPayrollById = async (req, res, next) => {
         {
           model: Employee,
           as: 'employee',
-          attributes: { exclude: ['user_id'] }
+          attributes: { exclude: ['user_id'] },
+          where: { company_id: req.user.company_id },
+          required: true
         }
       ]
     });
@@ -135,6 +143,7 @@ exports.calculatePayroll = async (req, res, next) => {
       employee_id,
       year,
       month,
+      basic_salary: form_basic_salary,
       allowances = 0,
       overtime_pay = 0,
       bonus = 0,
@@ -145,8 +154,10 @@ exports.calculatePayroll = async (req, res, next) => {
       notes
     } = req.body;
 
-    // Validate employee
-    const employee = await Employee.findByPk(employee_id);
+    // Validate employee belongs to active company
+    const employee = await Employee.findOne({
+      where: { id: employee_id, company_id: req.user.company_id }
+    });
     if (!employee) {
       await transaction.rollback();
       return res.status(404).json({
@@ -181,15 +192,48 @@ exports.calculatePayroll = async (req, res, next) => {
     const pay_period_end = new Date(year, month, 0);
 
     // Calculate gross salary
-    const basic_salary = parseFloat(employee.basic_salary);
+    const basic_salary = form_basic_salary != null ? parseFloat(form_basic_salary) : parseFloat(employee.basic_salary);
     const gross_salary = basic_salary +
                         parseFloat(allowances) +
                         parseFloat(overtime_pay) +
                         parseFloat(bonus) +
                         parseFloat(commission);
 
-    // Calculate statutory deductions
-    const statutory = calculateAllStatutory(gross_salary);
+    // Fetch YTD data from previous payroll records for PCB calculation
+    const previousPayrolls = await Payroll.findAll({
+      where: {
+        employee_id,
+        year,
+        month: { [Op.lt]: month },
+        status: { [Op.notIn]: ['Cancelled'] }
+      },
+      attributes: ['gross_salary', 'epf_employee', 'pcb_deduction'],
+      raw: true
+    });
+
+    const ytdGross = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.gross_salary || 0), 0);
+    const ytdEpf = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.epf_employee || 0), 0);
+    const ytdPcbDeducted = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.pcb_deduction || 0), 0);
+
+    // Calculate statutory deductions with employee profile and YTD data
+    const statutory = calculateAllStatutory(gross_salary, {
+      employee: {
+        tax_category: employee.tax_category || 'KA',
+        number_of_children: employee.number_of_children || 0,
+        children_in_higher_education: employee.children_in_higher_education || 0,
+        disabled_children: employee.disabled_children || 0,
+        disabled_self: employee.disabled_self || false,
+        disabled_spouse: employee.disabled_spouse || false
+      },
+      ytd: {
+        gross: ytdGross,
+        epf: ytdEpf,
+        pcbDeducted: ytdPcbDeducted,
+        zakat: 0
+      },
+      currentMonth: month,
+      additionalRemuneration: parseFloat(bonus) + parseFloat(commission)
+    });
 
     // Calculate total deductions
     const total_deductions = statutory.totalEmployeeDeduction +
@@ -261,7 +305,10 @@ exports.updatePayroll = async (req, res, next) => {
     const { id } = req.params;
     const updates = req.body;
 
-    const payroll = await Payroll.findByPk(id);
+    const payroll = await Payroll.findOne({
+      where: { id },
+      include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
+    });
 
     if (!payroll) {
       await transaction.rollback();
@@ -286,16 +333,55 @@ exports.updatePayroll = async (req, res, next) => {
         updates.unpaid_leave_deduction !== undefined || updates.other_deductions !== undefined) {
 
       const basic_salary = updates.basic_salary || payroll.basic_salary;
+      const currentBonus = parseFloat(updates.bonus ?? payroll.bonus);
+      const currentCommission = parseFloat(updates.commission ?? payroll.commission);
       const gross_salary = parseFloat(basic_salary) +
-                          parseFloat(updates.allowances || payroll.allowances) +
-                          parseFloat(updates.overtime_pay || payroll.overtime_pay) +
-                          parseFloat(updates.bonus || payroll.bonus) +
-                          parseFloat(updates.commission || payroll.commission);
+                          parseFloat(updates.allowances ?? payroll.allowances) +
+                          parseFloat(updates.overtime_pay ?? payroll.overtime_pay) +
+                          currentBonus +
+                          currentCommission;
 
-      const statutory = calculateAllStatutory(gross_salary);
+      // Fetch employee data for PCB calculation
+      const employee = await Employee.findByPk(payroll.employee_id);
+
+      // Fetch YTD data from previous payroll records
+      const previousPayrolls = await Payroll.findAll({
+        where: {
+          employee_id: payroll.employee_id,
+          year: payroll.year,
+          month: { [Op.lt]: payroll.month },
+          status: { [Op.notIn]: ['Cancelled'] }
+        },
+        attributes: ['gross_salary', 'epf_employee', 'pcb_deduction'],
+        raw: true
+      });
+
+      const ytdGross = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.gross_salary || 0), 0);
+      const ytdEpf = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.epf_employee || 0), 0);
+      const ytdPcbDeducted = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.pcb_deduction || 0), 0);
+
+      const statutory = calculateAllStatutory(gross_salary, {
+        employee: {
+          tax_category: employee?.tax_category || 'KA',
+          number_of_children: employee?.number_of_children || 0,
+          children_in_higher_education: employee?.children_in_higher_education || 0,
+          disabled_children: employee?.disabled_children || 0,
+          disabled_self: employee?.disabled_self || false,
+          disabled_spouse: employee?.disabled_spouse || false
+        },
+        ytd: {
+          gross: ytdGross,
+          epf: ytdEpf,
+          pcbDeducted: ytdPcbDeducted,
+          zakat: 0
+        },
+        currentMonth: payroll.month,
+        additionalRemuneration: currentBonus + currentCommission
+      });
+
       const total_deductions = statutory.totalEmployeeDeduction +
-                              parseFloat(updates.unpaid_leave_deduction || payroll.unpaid_leave_deduction) +
-                              parseFloat(updates.other_deductions || payroll.other_deductions);
+                              parseFloat(updates.unpaid_leave_deduction ?? payroll.unpaid_leave_deduction) +
+                              parseFloat(updates.other_deductions ?? payroll.other_deductions);
 
       updates.gross_salary = gross_salary;
       updates.epf_employee = statutory.epf.employee;
@@ -333,7 +419,10 @@ exports.submitForApproval = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const payroll = await Payroll.findByPk(id);
+    const payroll = await Payroll.findOne({
+      where: { id },
+      include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
+    });
 
     if (!payroll) {
       return res.status(404).json({
@@ -375,7 +464,10 @@ exports.approvePayroll = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const payroll = await Payroll.findByPk(id);
+    const payroll = await Payroll.findOne({
+      where: { id },
+      include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
+    });
 
     if (!payroll) {
       return res.status(404).json({
@@ -417,7 +509,10 @@ exports.markAsPaid = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const payroll = await Payroll.findByPk(id);
+    const payroll = await Payroll.findOne({
+      where: { id },
+      include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
+    });
 
     if (!payroll) {
       return res.status(404).json({
@@ -455,7 +550,10 @@ exports.deletePayroll = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const payroll = await Payroll.findByPk(id);
+    const payroll = await Payroll.findOne({
+      where: { id },
+      include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
+    });
 
     if (!payroll) {
       return res.status(404).json({
@@ -486,6 +584,46 @@ exports.deletePayroll = async (req, res, next) => {
 };
 
 /**
+ * Permanently delete a cancelled payroll record
+ */
+exports.permanentDeletePayroll = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const payroll = await Payroll.findOne({
+      where: { id },
+      include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
+    });
+
+    if (!payroll) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payroll record not found'
+      });
+    }
+
+    if (payroll.status !== 'Cancelled') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only cancelled payroll records can be permanently deleted'
+      });
+    }
+
+    await payroll.destroy();
+
+    logger.info(`Payroll ${id} permanently deleted by user ${req.user.id}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Payroll permanently deleted successfully'
+    });
+  } catch (error) {
+    logger.error(`Error permanently deleting payroll ${req.params.id}:`, error);
+    next(error);
+  }
+};
+
+/**
  * Generate payslip for a specific payroll record
  */
 exports.generatePayslip = async (req, res, next) => {
@@ -501,7 +639,9 @@ exports.generatePayslip = async (req, res, next) => {
             'id', 'employee_id', 'full_name', 'ic_no',
             'position', 'department', 'bank_name',
             'bank_account_no', 'epf_no', 'socso_no', 'tax_no'
-          ]
+          ],
+          where: { company_id: req.user.company_id },
+          required: true
         }
       ]
     });
@@ -767,6 +907,290 @@ exports.getMyPayslips = async (req, res, next) => {
     });
   } catch (error) {
     logger.error('Error fetching my payslips:', error);
+    next(error);
+  }
+};
+
+/**
+ * Bulk submit payrolls for approval (Draft -> Pending)
+ */
+exports.bulkSubmitForApproval = async (req, res, next) => {
+  try {
+    const { payroll_ids } = req.body;
+
+    const payrolls = await Payroll.findAll({
+      where: { id: { [Op.in]: payroll_ids } },
+      include: [{
+        model: Employee,
+        as: 'employee',
+        where: { company_id: req.user.company_id },
+        attributes: ['id', 'full_name'],
+        required: true
+      }]
+    });
+
+    const foundIds = new Set(payrolls.map(p => p.id));
+    const results = [];
+
+    for (const id of payroll_ids) {
+      if (!foundIds.has(id)) {
+        results.push({ id, success: false, message: 'Payroll record not found' });
+      }
+    }
+
+    for (const payroll of payrolls) {
+      try {
+        if (payroll.status !== 'Draft') {
+          results.push({ id: payroll.id, success: false, message: `Cannot submit: status is '${payroll.status}', expected 'Draft'` });
+          continue;
+        }
+        await payroll.update({ status: 'Pending', submitted_by: req.user.id, submitted_at: new Date() });
+        results.push({ id: payroll.id, success: true, message: 'Submitted for approval' });
+      } catch (error) {
+        results.push({ id: payroll.id, success: false, message: error.message });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    const failCount = results.filter(r => !r.success).length;
+
+    logger.info(`Bulk submit: ${successCount} succeeded, ${failCount} failed`, { user_id: req.user.id, payroll_ids });
+
+    res.status(200).json({
+      success: true,
+      message: `Bulk submit completed: ${successCount} succeeded, ${failCount} failed`,
+      data: { successCount, failCount, results }
+    });
+  } catch (error) {
+    logger.error('Error bulk submitting payrolls:', error);
+    next(error);
+  }
+};
+
+/**
+ * Bulk approve payrolls (Pending -> Approved)
+ */
+exports.bulkApprovePayroll = async (req, res, next) => {
+  try {
+    const { payroll_ids } = req.body;
+
+    const payrolls = await Payroll.findAll({
+      where: { id: { [Op.in]: payroll_ids } },
+      include: [{
+        model: Employee,
+        as: 'employee',
+        where: { company_id: req.user.company_id },
+        attributes: ['id', 'full_name'],
+        required: true
+      }]
+    });
+
+    const foundIds = new Set(payrolls.map(p => p.id));
+    const results = [];
+
+    for (const id of payroll_ids) {
+      if (!foundIds.has(id)) {
+        results.push({ id, success: false, message: 'Payroll record not found' });
+      }
+    }
+
+    for (const payroll of payrolls) {
+      try {
+        if (payroll.status !== 'Pending') {
+          results.push({ id: payroll.id, success: false, message: `Cannot approve: status is '${payroll.status}', expected 'Pending'` });
+          continue;
+        }
+        await payroll.update({ status: 'Approved', approved_by: req.user.id, approved_at: new Date() });
+        results.push({ id: payroll.id, success: true, message: 'Approved successfully' });
+      } catch (error) {
+        results.push({ id: payroll.id, success: false, message: error.message });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    const failCount = results.filter(r => !r.success).length;
+
+    logger.info(`Bulk approve: ${successCount} succeeded, ${failCount} failed`, { user_id: req.user.id, payroll_ids });
+
+    res.status(200).json({
+      success: true,
+      message: `Bulk approve completed: ${successCount} succeeded, ${failCount} failed`,
+      data: { successCount, failCount, results }
+    });
+  } catch (error) {
+    logger.error('Error bulk approving payrolls:', error);
+    next(error);
+  }
+};
+
+/**
+ * Bulk mark payrolls as paid (Approved -> Paid)
+ */
+exports.bulkMarkAsPaid = async (req, res, next) => {
+  try {
+    const { payroll_ids } = req.body;
+
+    const payrolls = await Payroll.findAll({
+      where: { id: { [Op.in]: payroll_ids } },
+      include: [{
+        model: Employee,
+        as: 'employee',
+        where: { company_id: req.user.company_id },
+        attributes: ['id', 'full_name'],
+        required: true
+      }]
+    });
+
+    const foundIds = new Set(payrolls.map(p => p.id));
+    const results = [];
+
+    for (const id of payroll_ids) {
+      if (!foundIds.has(id)) {
+        results.push({ id, success: false, message: 'Payroll record not found' });
+      }
+    }
+
+    for (const payroll of payrolls) {
+      try {
+        if (payroll.status !== 'Approved') {
+          results.push({ id: payroll.id, success: false, message: `Cannot mark as paid: status is '${payroll.status}', expected 'Approved'` });
+          continue;
+        }
+        await payroll.update({ status: 'Paid' });
+        results.push({ id: payroll.id, success: true, message: 'Marked as paid' });
+      } catch (error) {
+        results.push({ id: payroll.id, success: false, message: error.message });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    const failCount = results.filter(r => !r.success).length;
+
+    logger.info(`Bulk mark paid: ${successCount} succeeded, ${failCount} failed`, { user_id: req.user.id, payroll_ids });
+
+    res.status(200).json({
+      success: true,
+      message: `Bulk mark paid completed: ${successCount} succeeded, ${failCount} failed`,
+      data: { successCount, failCount, results }
+    });
+  } catch (error) {
+    logger.error('Error bulk marking payrolls as paid:', error);
+    next(error);
+  }
+};
+
+/**
+ * Bulk cancel payrolls (Draft/Pending -> Cancelled)
+ */
+exports.bulkCancelPayroll = async (req, res, next) => {
+  try {
+    const { payroll_ids } = req.body;
+
+    const payrolls = await Payroll.findAll({
+      where: { id: { [Op.in]: payroll_ids } },
+      include: [{
+        model: Employee,
+        as: 'employee',
+        where: { company_id: req.user.company_id },
+        attributes: ['id', 'full_name'],
+        required: true
+      }]
+    });
+
+    const foundIds = new Set(payrolls.map(p => p.id));
+    const results = [];
+
+    for (const id of payroll_ids) {
+      if (!foundIds.has(id)) {
+        results.push({ id, success: false, message: 'Payroll record not found' });
+      }
+    }
+
+    for (const payroll of payrolls) {
+      try {
+        if (payroll.status === 'Paid') {
+          results.push({ id: payroll.id, success: false, message: 'Cannot cancel paid payroll' });
+          continue;
+        }
+        if (payroll.status === 'Cancelled') {
+          results.push({ id: payroll.id, success: false, message: 'Payroll is already cancelled' });
+          continue;
+        }
+        await payroll.update({ status: 'Cancelled' });
+        results.push({ id: payroll.id, success: true, message: 'Cancelled successfully' });
+      } catch (error) {
+        results.push({ id: payroll.id, success: false, message: error.message });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    const failCount = results.filter(r => !r.success).length;
+
+    logger.info(`Bulk cancel: ${successCount} succeeded, ${failCount} failed`, { user_id: req.user.id, payroll_ids });
+
+    res.status(200).json({
+      success: true,
+      message: `Bulk cancel completed: ${successCount} succeeded, ${failCount} failed`,
+      data: { successCount, failCount, results }
+    });
+  } catch (error) {
+    logger.error('Error bulk cancelling payrolls:', error);
+    next(error);
+  }
+};
+
+/**
+ * Bulk permanently delete cancelled payrolls
+ */
+exports.bulkPermanentDeletePayroll = async (req, res, next) => {
+  try {
+    const { payroll_ids } = req.body;
+
+    const payrolls = await Payroll.findAll({
+      where: { id: { [Op.in]: payroll_ids } },
+      include: [{
+        model: Employee,
+        as: 'employee',
+        where: { company_id: req.user.company_id },
+        attributes: ['id', 'full_name'],
+        required: true
+      }]
+    });
+
+    const foundIds = new Set(payrolls.map(p => p.id));
+    const results = [];
+
+    for (const id of payroll_ids) {
+      if (!foundIds.has(id)) {
+        results.push({ id, success: false, message: 'Payroll record not found' });
+      }
+    }
+
+    for (const payroll of payrolls) {
+      try {
+        if (payroll.status !== 'Cancelled') {
+          results.push({ id: payroll.id, success: false, message: `Cannot delete: status is '${payroll.status}', expected 'Cancelled'` });
+          continue;
+        }
+        await payroll.destroy();
+        results.push({ id: payroll.id, success: true, message: 'Permanently deleted' });
+      } catch (error) {
+        results.push({ id: payroll.id, success: false, message: error.message });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    const failCount = results.filter(r => !r.success).length;
+
+    logger.info(`Bulk delete: ${successCount} succeeded, ${failCount} failed`, { user_id: req.user.id, payroll_ids });
+
+    res.status(200).json({
+      success: true,
+      message: `Bulk delete completed: ${successCount} succeeded, ${failCount} failed`,
+      data: { successCount, failCount, results }
+    });
+  } catch (error) {
+    logger.error('Error bulk deleting payrolls:', error);
     next(error);
   }
 };
