@@ -32,6 +32,7 @@ const leaveTypeRoutes = require('./routes/leaveType.routes');
 const publicHolidayRoutes = require('./routes/publicHoliday.routes');
 const statutoryConfigRoutes = require('./routes/statutoryConfig.routes');
 const emailTemplateRoutes = require('./routes/emailTemplate.routes');
+const leaveEntitlementRoutes = require('./routes/leaveEntitlement.routes');
 
 // Initialize express app
 const app = express();
@@ -118,6 +119,7 @@ app.use('/api/leave-types', leaveTypeRoutes);
 app.use('/api/public-holidays', publicHolidayRoutes);
 app.use('/api/statutory-config', statutoryConfigRoutes);
 app.use('/api/email-templates', emailTemplateRoutes);
+app.use('/api/leave-entitlements', leaveEntitlementRoutes);
 
 // Placeholder routes for other modules (to be implemented)
 // app.use('/api/invoices', invoiceRoutes);

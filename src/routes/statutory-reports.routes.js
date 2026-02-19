@@ -43,6 +43,13 @@ router.get('/ea/:employee_id/:year', adminAccess, statutoryReportsController.get
 router.get('/ea/:employee_id/:year/pdf', adminAccess, statutoryReportsController.downloadEAFormPDF);
 
 /**
+ * @route   GET /api/statutory-reports/ea/:employee_id/:year/excel
+ * @desc    Download EA Form as Excel (LHDN C.P.8A template)
+ * @access  Admin, Super Admin
+ */
+router.get('/ea/:employee_id/:year/excel', adminAccess, statutoryReportsController.downloadEAFormExcel);
+
+/**
  * EPF Borang A Routes (Monthly)
  */
 

@@ -1,0 +1,26 @@
+-- HRMS Seed Data for PostgreSQL (Supabase)
+-- Run this after Sequelize sync creates the schema
+-- Execute via Supabase SQL Editor
+--
+-- NOTE: Leave types and claim types are now company-scoped.
+-- Default types should be created per-company during company setup,
+-- NOT as global seed data. The seed entries below are kept as reference
+-- for the default types each new company should receive.
+
+-- Default leave types (requires a valid company_id)
+-- Replace <COMPANY_ID> with the actual company ID
+-- INSERT INTO leave_types (company_id, name, days_per_year, is_paid, carry_forward_allowed, carry_forward_max_days, prorate_for_new_joiners, requires_document, description, created_at, updated_at) VALUES
+-- (<COMPANY_ID>, 'Annual Leave', 14, TRUE, TRUE, 7, TRUE, FALSE, 'Annual leave entitlement', NOW(), NOW()),
+-- (<COMPANY_ID>, 'Medical Leave', 14, TRUE, FALSE, 0, FALSE, TRUE, 'Medical leave with medical certificate', NOW(), NOW()),
+-- (<COMPANY_ID>, 'Emergency Leave', 5, TRUE, FALSE, 0, FALSE, FALSE, 'Emergency personal leave', NOW(), NOW()),
+-- (<COMPANY_ID>, 'Unpaid Leave', 0, FALSE, FALSE, 0, FALSE, FALSE, 'Unpaid leave', NOW(), NOW())
+-- ON CONFLICT DO NOTHING;
+
+-- Default claim types (requires a valid company_id)
+-- Replace <COMPANY_ID> with the actual company ID
+-- INSERT INTO claim_types (company_id, name, requires_receipt, max_amount, description, created_at, updated_at) VALUES
+-- (<COMPANY_ID>, 'Medical', TRUE, 500.00, 'Medical expenses claim', NOW(), NOW()),
+-- (<COMPANY_ID>, 'Travel', TRUE, 200.00, 'Travel expenses for business purposes', NOW(), NOW()),
+-- (<COMPANY_ID>, 'Meal', TRUE, 50.00, 'Meal allowance for overtime/business', NOW(), NOW()),
+-- (<COMPANY_ID>, 'Parking', TRUE, 30.00, 'Parking fees for business purposes', NOW(), NOW())
+-- ON CONFLICT DO NOTHING;

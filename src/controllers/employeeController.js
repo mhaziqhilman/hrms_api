@@ -184,8 +184,8 @@ exports.createEmployee = async (req, res, next) => {
       });
     }
 
-    // Create employee scoped to active company
-    const employee = await Employee.create({
+    // Convert empty strings to null for optional fields
+    const employeeData = {
       employee_id,
       full_name,
       ic_no,
@@ -220,7 +220,16 @@ exports.createEmployee = async (req, res, next) => {
       photo_url,
       company_id: req.user.company_id,
       employment_status: 'Active'
+    };
+
+    Object.keys(employeeData).forEach(key => {
+      if (employeeData[key] === '' || employeeData[key] === 'Invalid date') {
+        employeeData[key] = null;
+      }
     });
+
+    // Create employee scoped to active company
+    const employee = await Employee.create(employeeData);
 
     // Note: YTD Statutory records will be created when payroll is processed
     // No need to initialize them on employee creation

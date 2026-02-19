@@ -27,7 +27,7 @@ const createEmployeeValidation = [
     .isDecimal().withMessage('Basic salary must be a valid decimal'),
   body('join_date')
     .notEmpty().withMessage('Join date is required')
-    .isDate().withMessage('Join date must be a valid date'),
+    .isISO8601().withMessage('Join date must be a valid date'),
   body('email')
     .optional()
     .isEmail().withMessage('Must be a valid email address'),
@@ -55,7 +55,7 @@ const updateEmployeeValidation = [
     .isDecimal().withMessage('Basic salary must be a valid decimal'),
   body('join_date')
     .optional()
-    .isDate().withMessage('Join date must be a valid date'),
+    .isISO8601().withMessage('Join date must be a valid date'),
   body('email')
     .optional()
     .isEmail().withMessage('Must be a valid email address'),

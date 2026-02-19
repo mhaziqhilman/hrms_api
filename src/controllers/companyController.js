@@ -168,9 +168,21 @@ const getAllCompanies = async (req, res, next) => {
   try {
     const companies = await companyService.getAllCompanies();
 
+    // Resolve logo storage paths to signed URLs
+    const companiesData = companies.map(c => c.toJSON ? c.toJSON() : { ...c });
+    if (storageService.isConfigured()) {
+      for (const comp of companiesData) {
+        if (comp.logo_url && !comp.logo_url.startsWith('http')) {
+          try {
+            comp.logo_url = await storageService.getSignedUrl(comp.logo_url, 7 * 24 * 3600);
+          } catch (err) { /* skip */ }
+        }
+      }
+    }
+
     res.json({
       success: true,
-      data: companies
+      data: companiesData
     });
   } catch (error) {
     next(error);
@@ -216,6 +228,18 @@ const switchCompany = async (req, res, next) => {
     const updatedUser = await companyService.switchCompany(userId, company_id);
     const token = generateToken(updatedUser);
 
+    // Resolve company logo storage path to signed URL
+    const companyData = updatedUser.company
+      ? (updatedUser.company.toJSON ? updatedUser.company.toJSON() : { ...updatedUser.company })
+      : null;
+    if (companyData && companyData.logo_url && !companyData.logo_url.startsWith('http') && storageService.isConfigured()) {
+      try {
+        companyData.logo_url = await storageService.getSignedUrl(companyData.logo_url, 7 * 24 * 3600);
+      } catch (err) {
+        logger.error('Failed to generate logo signed URL on switch:', err.message);
+      }
+    }
+
     res.json({
       success: true,
       message: 'Company switched successfully',
@@ -228,7 +252,7 @@ const switchCompany = async (req, res, next) => {
           email_verified: updatedUser.email_verified,
           company_id: updatedUser.company_id,
           employee: updatedUser.employee,
-          company: updatedUser.company
+          company: companyData
         }
       }
     });

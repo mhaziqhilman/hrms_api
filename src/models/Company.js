@@ -51,6 +51,37 @@ const Company = sequelize.define('Company', {
     allowNull: true,
     field: 'logo_url'
   },
+  // Statutory / Employer Registration Fields
+  e_file_no: {
+    type: DataTypes.STRING(30),
+    allowNull: true,
+    field: 'e_file_no'
+  },
+  employer_epf_no: {
+    type: DataTypes.STRING(30),
+    allowNull: true,
+    field: 'employer_epf_no'
+  },
+  employer_socso_code: {
+    type: DataTypes.STRING(30),
+    allowNull: true,
+    field: 'employer_socso_code'
+  },
+  signatory_name: {
+    type: DataTypes.STRING(150),
+    allowNull: true,
+    field: 'signatory_name'
+  },
+  signatory_position: {
+    type: DataTypes.STRING(100),
+    allowNull: true,
+    field: 'signatory_position'
+  },
+  lhdn_branch: {
+    type: DataTypes.STRING(50),
+    allowNull: true,
+    field: 'lhdn_branch'
+  },
   owner_id: {
     type: DataTypes.INTEGER,
     allowNull: false,

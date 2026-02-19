@@ -124,7 +124,9 @@ const updateCompany = async (companyId, updateData) => {
 
   const allowedFields = [
     'name', 'registration_no', 'description', 'industry',
-    'size', 'country', 'address', 'phone', 'website', 'logo_url'
+    'size', 'country', 'address', 'phone', 'website', 'logo_url',
+    'e_file_no', 'employer_epf_no', 'employer_socso_code',
+    'signatory_name', 'signatory_position', 'lhdn_branch'
   ];
 
   const filteredData = {};
@@ -214,7 +216,7 @@ const switchCompany = async (userId, companyId) => {
       {
         model: Company,
         as: 'company',
-        attributes: ['id', 'name'],
+        attributes: ['id', 'name', 'logo_url'],
         required: false
       }
     ]
@@ -224,7 +226,7 @@ const switchCompany = async (userId, companyId) => {
   // This sets the viewing context without persisting to DB
   if (isSuperAdmin) {
     updatedUser.dataValues.company_id = companyId;
-    const viewingCompany = await Company.findByPk(companyId, { attributes: ['id', 'name'] });
+    const viewingCompany = await Company.findByPk(companyId, { attributes: ['id', 'name', 'logo_url'] });
     updatedUser.dataValues.company = viewingCompany;
   }
 

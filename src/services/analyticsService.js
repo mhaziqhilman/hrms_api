@@ -15,6 +15,33 @@ const { sequelize, Payroll, Employee, Leave, LeaveType, Attendance, Claim, Claim
  * @returns {Object} Payroll analytics data
  */
 const getPayrollCostAnalytics = async (companyId, year, startMonth = 1, endMonth = 12) => {
+  const emptyResult = {
+    year,
+    period: { startMonth, endMonth },
+    summary: {
+      total_gross: 0, total_net: 0, total_epf: 0,
+      total_socso: 0, total_eis: 0, total_pcb: 0, employee_count: 0
+    },
+    by_month: [],
+    by_department: []
+  };
+
+  if (!companyId) return emptyResult;
+
+  const baseWhere = {
+    year,
+    month: { [Op.between]: [startMonth, endMonth] },
+    status: { [Op.in]: ['Approved', 'Paid'] }
+  };
+
+  const employeeInclude = {
+    model: Employee,
+    as: 'employee',
+    where: { company_id: companyId },
+    attributes: [],
+    required: true
+  };
+
   // Aggregate by month
   const byMonth = await Payroll.findAll({
     attributes: [
@@ -30,18 +57,8 @@ const getPayrollCostAnalytics = async (companyId, year, startMonth = 1, endMonth
       [fn('SUM', col('pcb_deduction')), 'total_pcb'],
       [fn('COUNT', col('Payroll.id')), 'employee_count']
     ],
-    include: [{
-      model: Employee,
-      as: 'employee',
-      where: { company_id: companyId },
-      attributes: [],
-      required: true
-    }],
-    where: {
-      year,
-      month: { [Op.between]: [startMonth, endMonth] },
-      status: { [Op.in]: ['Approved', 'Paid'] }
-    },
+    include: [employeeInclude],
+    where: baseWhere,
     group: ['month'],
     order: [['month', 'ASC']],
     raw: true
@@ -61,25 +78,21 @@ const getPayrollCostAnalytics = async (companyId, year, startMonth = 1, endMonth
       where: { company_id: companyId },
       attributes: []
     }],
-    where: {
-      year,
-      month: { [Op.between]: [startMonth, endMonth] },
-      status: { [Op.in]: ['Approved', 'Paid'] }
-    },
+    where: baseWhere,
     group: [col('employee.department')],
     raw: true
   });
 
-  // Calculate summary
+  // Calculate summary using qualified column references for PostgreSQL compatibility
   const summary = await Payroll.findOne({
     attributes: [
       [fn('SUM', col('gross_salary')), 'total_gross'],
       [fn('SUM', col('net_salary')), 'total_net'],
-      [fn('SUM', literal('epf_employee + epf_employer')), 'total_epf'],
-      [fn('SUM', literal('socso_employee + socso_employer')), 'total_socso'],
-      [fn('SUM', literal('eis_employee + eis_employer')), 'total_eis'],
+      [fn('SUM', literal('"Payroll"."epf_employee" + "Payroll"."epf_employer"')), 'total_epf'],
+      [fn('SUM', literal('"Payroll"."socso_employee" + "Payroll"."socso_employer"')), 'total_socso'],
+      [fn('SUM', literal('"Payroll"."eis_employee" + "Payroll"."eis_employer"')), 'total_eis'],
       [fn('SUM', col('pcb_deduction')), 'total_pcb'],
-      [fn('COUNT', fn('DISTINCT', col('employee_id'))), 'employee_count']
+      [fn('COUNT', fn('DISTINCT', col('Payroll.employee_id'))), 'employee_count']
     ],
     include: [{
       model: Employee,
@@ -87,11 +100,7 @@ const getPayrollCostAnalytics = async (companyId, year, startMonth = 1, endMonth
       where: { company_id: companyId },
       attributes: []
     }],
-    where: {
-      year,
-      month: { [Op.between]: [startMonth, endMonth] },
-      status: { [Op.in]: ['Approved', 'Paid'] }
-    },
+    where: baseWhere,
     raw: true
   });
 

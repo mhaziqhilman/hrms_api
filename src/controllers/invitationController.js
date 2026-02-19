@@ -282,6 +282,8 @@ const getInvitationInfo = async (req, res, next) => {
   try {
     const { token } = req.query;
 
+    
+
     if (!token) {
       return res.status(400).json({ success: false, message: 'Token is required' });
     }
@@ -291,11 +293,15 @@ const getInvitationInfo = async (req, res, next) => {
       include: [{ model: Company, as: 'company', attributes: ['id', 'name', 'logo_url'] }]
     });
 
+
     if (!invitation) {
       return res.status(404).json({ success: false, message: 'Invitation not found' });
     }
 
     const isExpired = invitation.status !== 'pending' || new Date(invitation.expires_at) < new Date();
+
+
+    console.log(isExpired + "--------------------")
 
     res.json({
       success: true,
