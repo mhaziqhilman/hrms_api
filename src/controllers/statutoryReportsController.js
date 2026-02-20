@@ -7,13 +7,15 @@ const { Op, col } = require('sequelize');
 const logger = require('../utils/logger');
 const { roundToTwo } = require('../utils/helpers');
 const {
-  generateEAFormPDF,
   generateEPFBorangAPDF,
   generateSOCSOForm8APDF,
   generatePCBCP39PDF,
   generateCSV
 } = require('../services/reportGeneratorService');
 const { generateEAFormExcel } = require('../services/eaExcelService');
+const libre = require('libreoffice-convert');
+const { promisify } = require('util');
+const convertAsync = promisify(libre.convert);
 
 /**
  * Fetch company info for the current user.
@@ -40,6 +42,78 @@ async function getCompanyInfo(userId) {
     address: company.address || '',
     phone: company.phone || '',
     _raw: company
+  };
+}
+
+/**
+ * Shared helper: fetch employee, payroll records, calculate totals, and return
+ * the data object needed by both the Excel and PDF EA form generators.
+ */
+async function buildEAFormData(userId, employeeId, year) {
+  const employee = await Employee.findByPk(employeeId);
+  if (!employee) return { error: 'Employee not found' };
+
+  const payrollRecords = await Payroll.findAll({
+    where: {
+      employee_id: employeeId,
+      year: parseInt(year),
+      status: { [Op.in]: ['Approved', 'Paid'] }
+    },
+    order: [['month', 'ASC']]
+  });
+
+  if (payrollRecords.length === 0) return { error: 'No payroll records found' };
+
+  const totals = payrollRecords.reduce((acc, record) => {
+    acc.salary += parseFloat(record.basic_salary) || 0;
+    acc.allowances += parseFloat(record.allowances) || 0;
+    acc.bonus += parseFloat(record.bonus) || 0;
+    acc.commission += parseFloat(record.commission) || 0;
+    acc.overtime += parseFloat(record.overtime_pay) || 0;
+    acc.gross_total += parseFloat(record.gross_salary) || 0;
+    acc.epf_employee += parseFloat(record.epf_employee) || 0;
+    acc.epf_employer += parseFloat(record.epf_employer) || 0;
+    acc.socso_employee += parseFloat(record.socso_employee) || 0;
+    acc.socso_employer += parseFloat(record.socso_employer) || 0;
+    acc.eis_employee += parseFloat(record.eis_employee) || 0;
+    acc.eis_employer += parseFloat(record.eis_employer) || 0;
+    acc.pcb += parseFloat(record.pcb_deduction) || 0;
+    return acc;
+  }, {
+    salary: 0, allowances: 0, bonus: 0, commission: 0, overtime: 0, gross_total: 0,
+    epf_employee: 0, epf_employer: 0, socso_employee: 0, socso_employer: 0,
+    eis_employee: 0, eis_employer: 0, pcb: 0
+  });
+
+  const user = await User.findByPk(userId, { attributes: ['company_id'] });
+  const company = user && user.company_id ? await Company.findByPk(user.company_id) : {};
+
+  return {
+    company: company || {},
+    employee,
+    year: parseInt(year),
+    income: {
+      salary: roundToTwo(totals.salary),
+      overtime: roundToTwo(totals.overtime),
+      commission: roundToTwo(totals.commission),
+      bonus: roundToTwo(totals.bonus),
+      allowances: roundToTwo(totals.allowances),
+      gross_total: roundToTwo(totals.gross_total)
+    },
+    deductions: {
+      epf_employee: roundToTwo(totals.epf_employee),
+      socso_employee: roundToTwo(totals.socso_employee),
+      eis_employee: roundToTwo(totals.eis_employee),
+      pcb: roundToTwo(totals.pcb),
+      total: roundToTwo(totals.epf_employee + totals.socso_employee + totals.eis_employee + totals.pcb)
+    },
+    employer_contributions: {
+      epf: roundToTwo(totals.epf_employer),
+      socso: roundToTwo(totals.socso_employer),
+      eis: roundToTwo(totals.eis_employer)
+    },
+    months_worked: payrollRecords.length,
+    serialNo: employee.id
   };
 }
 
@@ -174,97 +248,25 @@ exports.getEAForm = async (req, res, next) => {
 };
 
 /**
- * Download EA Form as PDF
+ * Download EA Form as PDF (LHDN template via LibreOffice conversion)
  */
 exports.downloadEAFormPDF = async (req, res, next) => {
   try {
     const { employee_id, year } = req.params;
 
-    // Get EA form data first
-    const employee = await Employee.findByPk(employee_id);
-    if (!employee) {
-      return res.status(404).json({
-        success: false,
-        message: 'Employee not found'
-      });
+    const data = await buildEAFormData(req.user.id, employee_id, year);
+    if (data.error) {
+      return res.status(404).json({ success: false, message: data.error });
     }
 
-    const payrollRecords = await Payroll.findAll({
-      where: {
-        employee_id,
-        year: parseInt(year),
-        status: { [Op.in]: ['Approved', 'Paid'] }
-      }
-    });
+    // Generate the filled LHDN Excel template
+    const excelBuffer = await generateEAFormExcel(data);
 
-    if (payrollRecords.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'No payroll records found'
-      });
-    }
-
-    // Calculate totals
-    const totals = payrollRecords.reduce((acc, record) => {
-      acc.salary += parseFloat(record.basic_salary) || 0;
-      acc.allowances += parseFloat(record.allowances) || 0;
-      acc.bonus += parseFloat(record.bonus) || 0;
-      acc.commission += parseFloat(record.commission) || 0;
-      acc.overtime += parseFloat(record.overtime_pay) || 0;
-      acc.gross_total += parseFloat(record.gross_salary) || 0;
-      acc.epf_employee += parseFloat(record.epf_employee) || 0;
-      acc.epf_employer += parseFloat(record.epf_employer) || 0;
-      acc.socso_employee += parseFloat(record.socso_employee) || 0;
-      acc.socso_employer += parseFloat(record.socso_employer) || 0;
-      acc.eis_employee += parseFloat(record.eis_employee) || 0;
-      acc.eis_employer += parseFloat(record.eis_employer) || 0;
-      acc.pcb += parseFloat(record.pcb_deduction) || 0;
-      return acc;
-    }, {
-      salary: 0, allowances: 0, bonus: 0, commission: 0, overtime: 0, gross_total: 0,
-      epf_employee: 0, epf_employer: 0, socso_employee: 0, socso_employer: 0,
-      eis_employee: 0, eis_employer: 0, pcb: 0
-    });
-
-    const totalDeductions = totals.epf_employee + totals.socso_employee + totals.eis_employee + totals.pcb;
-
-    const companyInfo = await getCompanyInfo(req.user.id);
-
-    const eaFormData = {
-      year: parseInt(year),
-      employer: companyInfo,
-      employee: {
-        full_name: employee.full_name,
-        ic_no: employee.ic_no,
-        tax_no: employee.tax_no,
-        position: employee.position
-      },
-      income: {
-        salary: roundToTwo(totals.salary),
-        allowances: roundToTwo(totals.allowances),
-        bonus: roundToTwo(totals.bonus),
-        commission: roundToTwo(totals.commission),
-        overtime: roundToTwo(totals.overtime),
-        gross_total: roundToTwo(totals.gross_total)
-      },
-      deductions: {
-        epf_employee: roundToTwo(totals.epf_employee),
-        socso_employee: roundToTwo(totals.socso_employee),
-        eis_employee: roundToTwo(totals.eis_employee),
-        pcb: roundToTwo(totals.pcb),
-        total: roundToTwo(totalDeductions)
-      },
-      employer_contributions: {
-        epf: roundToTwo(totals.epf_employer),
-        socso: roundToTwo(totals.socso_employer),
-        eis: roundToTwo(totals.eis_employer)
-      }
-    };
-
-    const pdfBuffer = await generateEAFormPDF(eaFormData);
+    // Convert Excel to PDF via LibreOffice headless
+    const pdfBuffer = await convertAsync(excelBuffer, '.pdf', undefined);
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=EA_Form_${employee.employee_id}_${year}.pdf`);
+    res.setHeader('Content-Disposition', `attachment; filename=EA_Form_${data.employee.employee_id}_${year}.pdf`);
     res.send(pdfBuffer);
 
     logger.info(`EA Form PDF downloaded for employee ${employee_id}, year ${year}`);
@@ -281,76 +283,15 @@ exports.downloadEAFormExcel = async (req, res, next) => {
   try {
     const { employee_id, year } = req.params;
 
-    const employee = await Employee.findByPk(employee_id);
-    if (!employee) {
-      return res.status(404).json({ success: false, message: 'Employee not found' });
+    const data = await buildEAFormData(req.user.id, employee_id, year);
+    if (data.error) {
+      return res.status(404).json({ success: false, message: data.error });
     }
 
-    const payrollRecords = await Payroll.findAll({
-      where: {
-        employee_id,
-        year: parseInt(year),
-        status: { [Op.in]: ['Approved', 'Paid'] }
-      },
-      order: [['month', 'ASC']]
-    });
-
-    if (payrollRecords.length === 0) {
-      return res.status(404).json({ success: false, message: 'No payroll records found' });
-    }
-
-    const totals = payrollRecords.reduce((acc, record) => {
-      acc.salary += parseFloat(record.basic_salary) || 0;
-      acc.allowances += parseFloat(record.allowances) || 0;
-      acc.bonus += parseFloat(record.bonus) || 0;
-      acc.commission += parseFloat(record.commission) || 0;
-      acc.overtime += parseFloat(record.overtime_pay) || 0;
-      acc.gross_total += parseFloat(record.gross_salary) || 0;
-      acc.epf_employee += parseFloat(record.epf_employee) || 0;
-      acc.epf_employer += parseFloat(record.epf_employer) || 0;
-      acc.socso_employee += parseFloat(record.socso_employee) || 0;
-      acc.socso_employer += parseFloat(record.socso_employer) || 0;
-      acc.eis_employee += parseFloat(record.eis_employee) || 0;
-      acc.eis_employer += parseFloat(record.eis_employer) || 0;
-      acc.pcb += parseFloat(record.pcb_deduction) || 0;
-      return acc;
-    }, {
-      salary: 0, allowances: 0, bonus: 0, commission: 0, overtime: 0, gross_total: 0,
-      epf_employee: 0, epf_employer: 0, socso_employee: 0, socso_employer: 0,
-      eis_employee: 0, eis_employer: 0, pcb: 0
-    });
-
-    const user = await User.findByPk(req.user.id, { attributes: ['company_id'] });
-    const company = user && user.company_id ? await Company.findByPk(user.company_id) : {};
-
-    const excelBuffer = await generateEAFormExcel({
-      company: company || {},
-      employee,
-      year: parseInt(year),
-      income: {
-        salary: roundToTwo(totals.salary),
-        overtime: roundToTwo(totals.overtime),
-        commission: roundToTwo(totals.commission),
-        bonus: roundToTwo(totals.bonus),
-        allowances: roundToTwo(totals.allowances),
-        gross_total: roundToTwo(totals.gross_total)
-      },
-      deductions: {
-        epf_employee: roundToTwo(totals.epf_employee),
-        socso_employee: roundToTwo(totals.socso_employee),
-        eis_employee: roundToTwo(totals.eis_employee),
-        pcb: roundToTwo(totals.pcb)
-      },
-      employer_contributions: {
-        epf: roundToTwo(totals.epf_employer),
-        socso: roundToTwo(totals.socso_employer),
-        eis: roundToTwo(totals.eis_employer)
-      },
-      serialNo: employee.id
-    });
+    const excelBuffer = await generateEAFormExcel(data);
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename=EA_Form_${employee.employee_id}_${year}.xlsx`);
+    res.setHeader('Content-Disposition', `attachment; filename=EA_Form_${data.employee.employee_id}_${year}.xlsx`);
     res.send(excelBuffer);
 
     logger.info(`EA Form Excel downloaded for employee ${employee_id}, year ${year}`);

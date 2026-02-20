@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: nextura-hrms-api
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_SSL
+        value: "true"
+      - key: DB_SYNC
+        value: "false"
+      - key: MAX_FILE_SIZE
+        value: "10485760"
+      - key: RATE_LIMIT_MAX_REQUESTS
+        value: "200"
+      - key: STANDARD_WORK_HOURS
+        value: "8"
+      - key: OVERTIME_RATE
+        value: "1.5"
+      - key: EPF_SALARY_CAP
+        value: "30000"
+      - key: SOCSO_SALARY_CAP
+        value: "5000"
+      - key: JWT_EXPIRES_IN
+        value: 24h
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 7d
+      - key: FRONTEND_URL
+        value: https://nextura-hrms.netlify.app
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
