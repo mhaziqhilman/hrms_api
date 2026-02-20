@@ -32,6 +32,7 @@ const generateEAFormExcel = async (data) => {
   ws.pageSetup.fitToPage = true;
   ws.pageSetup.fitToWidth = 1;
   ws.pageSetup.fitToHeight = 1;
+  ws.pageSetup.horizontalCentered = true;
 
   const { company, employee, year, income, deductions, employer_contributions, serialNo } = data;
 
