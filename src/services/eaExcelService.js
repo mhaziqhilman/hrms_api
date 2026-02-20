@@ -28,6 +28,11 @@ const generateEAFormExcel = async (data) => {
   const ws = wb.getWorksheet('C.P. 8A - Pin. 2021');
   if (!ws) throw new Error('Template worksheet not found');
 
+  // Force fit-to-one-page so LibreOffice scales correctly on any OS/font environment
+  ws.pageSetup.fitToPage = true;
+  ws.pageSetup.fitToWidth = 1;
+  ws.pageSetup.fitToHeight = 1;
+
   const { company, employee, year, income, deductions, employer_contributions, serialNo } = data;
 
   // Helper to safely set cell value
