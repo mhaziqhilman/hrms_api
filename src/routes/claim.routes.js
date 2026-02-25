@@ -103,6 +103,17 @@ router.get(
 );
 
 /**
+ * @route   GET /api/claims/analytics
+ * @desc    Get claims analytics (status counts with month comparison, by type breakdown)
+ * @access  Private (All authenticated users - scoped by role)
+ */
+router.get(
+  '/analytics',
+  verifyToken,
+  claimController.getClaimsAnalytics
+);
+
+/**
  * @route   GET /api/claims/:id
  * @desc    Get single claim by ID
  * @access  Private (Admin, Manager - any claim; Staff - own claim only)

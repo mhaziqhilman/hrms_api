@@ -74,6 +74,23 @@ router.get(
 );
 
 /**
+ * @route   GET /api/leaves/balance/:employee_id
+ * @desc    Get leave balance for an employee
+ * @access  Private (Admin, Manager, Staff - own balance only)
+ * @note    Must be defined BEFORE /:id to avoid route collision
+ */
+router.get(
+  '/balance/:employee_id',
+  verifyToken,
+  [
+    param('employee_id').isInt().withMessage('Employee ID must be an integer'),
+    query('year').optional().isInt({ min: 2020, max: 2100 }).withMessage('Invalid year')
+  ],
+  validate,
+  leaveController.getLeaveBalance
+);
+
+/**
  * @route   GET /api/leaves/:id
  * @desc    Get single leave application by ID
  * @access  Private (Admin, Manager, Staff - own record only)
@@ -137,22 +154,6 @@ router.delete(
   idParamValidation,
   validate,
   leaveController.cancelLeave
-);
-
-/**
- * @route   GET /api/leaves/balance/:employee_id
- * @desc    Get leave balance for an employee
- * @access  Private (Admin, Manager, Staff - own balance only)
- */
-router.get(
-  '/balance/:employee_id',
-  verifyToken,
-  [
-    param('employee_id').isInt().withMessage('Employee ID must be an integer'),
-    query('year').optional().isInt({ min: 2020, max: 2100 }).withMessage('Invalid year')
-  ],
-  validate,
-  leaveController.getLeaveBalance
 );
 
 module.exports = router;

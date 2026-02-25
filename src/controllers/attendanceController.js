@@ -1,4 +1,5 @@
 const { Attendance, Employee, WFHApplication, User } = require('../models');
+const notificationService = require('../services/notificationService');
 const logger = require('../utils/logger');
 const { Op } = require('sequelize');
 const { sequelize } = require('../config/database');
@@ -651,6 +652,25 @@ exports.approveRejectWFH = async (req, res, next) => {
         success: false,
         message: 'Invalid action. Must be "approve" or "reject"'
       });
+    }
+
+    // Send notification to the WFH applicant
+    const wfhEmployee = await Employee.findByPk(wfhApplication.employee_id, { attributes: ['user_id'] });
+    if (wfhEmployee?.user_id) {
+      const notifType = action === 'approve' ? 'wfh_approved' : 'wfh_rejected';
+      const notifTitle = action === 'approve' ? 'WFH Approved' : 'WFH Rejected';
+      const notifMessage = action === 'approve'
+        ? `Your work-from-home application has been approved.`
+        : `Your work-from-home application has been rejected.${rejection_reason ? ' Reason: ' + rejection_reason : ''}`;
+
+      notificationService.createNotification(
+        wfhEmployee.user_id,
+        req.user.company_id,
+        notifType,
+        notifTitle,
+        notifMessage,
+        { wfh_id: wfhApplication.id, link: '/attendance' }
+      );
     }
 
     // Fetch updated WFH application

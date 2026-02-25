@@ -1,4 +1,5 @@
 const { Leave, Employee, LeaveType, LeaveEntitlement, User } = require('../models');
+const notificationService = require('../services/notificationService');
 const logger = require('../utils/logger');
 const { Op } = require('sequelize');
 const { sequelize } = require('../config/database');
@@ -221,7 +222,8 @@ exports.applyLeave = async (req, res, next) => {
       });
     }
 
-    if (entitlement.balance_days < total_days) {
+    // Only check balance for paid leave types - unpaid leave is unlimited
+    if (leaveType.is_paid !== false && entitlement.balance_days < total_days) {
       await transaction.rollback();
       return res.status(400).json({
         success: false,
@@ -574,6 +576,24 @@ exports.approveRejectLeave = async (req, res, next) => {
     }
 
     await transaction.commit();
+
+    // Send notification to the leave applicant
+    if (leave.employee && leave.employee.user_id) {
+      const notifType = action === 'approve' ? 'leave_approved' : 'leave_rejected';
+      const notifTitle = action === 'approve' ? 'Leave Approved' : 'Leave Rejected';
+      const notifMessage = action === 'approve'
+        ? `Your ${leave.leave_type?.name || 'leave'} request (${leave.total_days} day${leave.total_days > 1 ? 's' : ''}) has been approved.`
+        : `Your ${leave.leave_type?.name || 'leave'} request (${leave.total_days} day${leave.total_days > 1 ? 's' : ''}) has been rejected.${rejection_reason ? ' Reason: ' + rejection_reason : ''}`;
+
+      notificationService.createNotification(
+        leave.employee.user_id,
+        req.user.company_id,
+        notifType,
+        notifTitle,
+        notifMessage,
+        { leave_id: leave.id, link: '/leave' }
+      );
+    }
 
     // Fetch updated leave
     const updatedLeave = await Leave.findByPk(id, {

@@ -32,6 +32,13 @@ const File = sequelize.define('File', {
     allowNull: false
   },
 
+  // Company scoping (multi-tenancy)
+  company_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    _comment: 'Company ID for multi-tenant scoping'
+  },
+
   // Context & Categorization
   category: {
     type: DataTypes.ENUM(
@@ -122,7 +129,8 @@ const File = sequelize.define('File', {
     { fields: ['related_to_employee_id'] },
     { fields: ['related_to_claim_id'] },
     { fields: ['uploaded_by'] },
-    { fields: ['status'] }
+    { fields: ['status'] },
+    { fields: ['company_id'] }
   ]
 });
 

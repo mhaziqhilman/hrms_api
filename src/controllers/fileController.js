@@ -3,6 +3,7 @@ const fileService = require('../services/fileService');
 const supabaseStorage = require('../services/supabaseStorageService');
 const { generateFilename, getStoragePath } = require('../config/upload.config');
 const File = require('../models/File');
+const Employee = require('../models/Employee');
 
 // Upload file(s)
 exports.uploadFiles = async (req, res) => {
@@ -55,6 +56,7 @@ exports.uploadFiles = async (req, res) => {
         category: category || 'other',
         sub_category: sub_category || null,
         uploaded_by: req.user.id,
+        company_id: req.user.company_id || null,
         related_to_employee_id: related_to_employee_id || null,
         related_to_claim_id: related_to_claim_id || null,
         related_to_leave_id: related_to_leave_id || null,
@@ -84,7 +86,7 @@ exports.uploadFiles = async (req, res) => {
   }
 };
 
-// Get all files with filters
+// Get all files with filters (enhanced with search, sort, uploader include)
 exports.getAllFiles = async (req, res) => {
   try {
     const {
@@ -93,16 +95,28 @@ exports.getAllFiles = async (req, res) => {
       related_to_employee_id,
       related_to_claim_id,
       related_to_leave_id,
+      search,
+      is_verified,
       page,
-      limit
+      limit,
+      sort,
+      order
     } = req.query;
 
     const filters = {};
+
+    // Company scoping - always scope to user's company
+    if (req.user.company_id) {
+      filters.company_id = req.user.company_id;
+    }
+
     if (category) filters.category = category;
     if (uploaded_by) filters.uploaded_by = uploaded_by;
     if (related_to_employee_id) filters.related_to_employee_id = related_to_employee_id;
     if (related_to_claim_id) filters.related_to_claim_id = related_to_claim_id;
     if (related_to_leave_id) filters.related_to_leave_id = related_to_leave_id;
+    if (search) filters.search = search;
+    if (is_verified !== undefined && is_verified !== '') filters.is_verified = is_verified;
 
     // Role-based filtering
     if (req.user.role === 'staff') {
@@ -110,7 +124,13 @@ exports.getAllFiles = async (req, res) => {
       filters.uploaded_by = req.user.id;
     }
 
-    const result = await fileService.getFiles(filters, { page, limit });
+    const result = await fileService.getFiles(filters, {
+      page,
+      limit,
+      sort,
+      order,
+      includeUploader: true
+    });
 
     res.json({
       success: true,
@@ -122,6 +142,58 @@ exports.getAllFiles = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching files',
+      error: error.message
+    });
+  }
+};
+
+// Get current user's documents (all files related to them)
+exports.getMyDocuments = async (req, res) => {
+  try {
+    const { search, page, limit, sort, order } = req.query;
+
+    // Find the user's employee record for the current company
+    const employee = await Employee.findOne({
+      where: { user_id: req.user.id, company_id: req.user.company_id },
+      attributes: ['id']
+    });
+
+    const result = await fileService.getMyDocuments(
+      req.user.id,
+      employee?.id || null,
+      req.user.company_id,
+      { search, page, limit, sort, order }
+    );
+
+    res.json({
+      success: true,
+      data: result.files,
+      pagination: result.pagination
+    });
+  } catch (error) {
+    console.error('Error fetching my documents:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching documents',
+      error: error.message
+    });
+  }
+};
+
+// Get document overview stats (admin only)
+exports.getDocumentOverview = async (req, res) => {
+  try {
+    const stats = await fileService.getDocumentOverviewStats(req.user.company_id);
+
+    res.json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    console.error('Error fetching document overview:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching document overview',
       error: error.message
     });
   }
@@ -248,6 +320,31 @@ exports.updateFileMetadata = async (req, res) => {
     });
   } catch (error) {
     console.error('Error updating file metadata:', error);
+    const statusCode = error.message === 'File not found' ? 404 : 500;
+    res.status(statusCode).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// Verify/unverify file (admin only)
+exports.verifyFile = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { is_verified } = req.body;
+
+    const updatedFile = await fileService.updateFileMetadata(id, {
+      is_verified: is_verified !== undefined ? is_verified : true
+    });
+
+    res.json({
+      success: true,
+      message: `File ${updatedFile.is_verified ? 'verified' : 'unverified'} successfully`,
+      data: updatedFile
+    });
+  } catch (error) {
+    console.error('Error verifying file:', error);
     const statusCode = error.message === 'File not found' ? 404 : 500;
     res.status(statusCode).json({
       success: false,
@@ -406,7 +503,7 @@ exports.getFilesByClaim = async (req, res) => {
 // Get storage statistics (admin only)
 exports.getStorageStats = async (req, res) => {
   try {
-    const stats = await fileService.getStorageStats();
+    const stats = await fileService.getStorageStats(req.user.company_id);
 
     res.json({
       success: true,

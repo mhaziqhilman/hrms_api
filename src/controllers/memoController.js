@@ -1,9 +1,77 @@
 const Memo = require('../models/Memo');
 const MemoReadReceipt = require('../models/MemoReadReceipt');
+const AnnouncementCategory = require('../models/AnnouncementCategory');
 const Employee = require('../models/Employee');
 const User = require('../models/User');
-const { Op } = require('sequelize');
+const { Op, literal, fn, cast } = require('sequelize');
 const { sequelize } = require('../config/database');
+
+// Build target audience filter conditions for staff users
+// Uses JSONB cast because target_* columns are JSON type and @> requires JSONB
+function buildTargetConditions(employee) {
+  // Escape single quotes for safe SQL literal usage
+  const escapeForSql = (val) => JSON.stringify(val).replace(/'/g, "''");
+  return [
+    { target_audience: 'All' },
+    {
+      target_audience: 'Department',
+      [Op.and]: literal(
+        `"target_departments"::jsonb @> '${escapeForSql([employee.department])}'::jsonb`
+      )
+    },
+    {
+      target_audience: 'Position',
+      [Op.and]: literal(
+        `"target_positions"::jsonb @> '${escapeForSql([employee.position])}'::jsonb`
+      )
+    },
+    {
+      target_audience: 'Specific',
+      [Op.and]: literal(
+        `"target_employee_ids"::jsonb @> '${escapeForSql([employee.id])}'::jsonb`
+      )
+    }
+  ];
+}
+const notificationService = require('../services/notificationService');
+const storageService = require('../services/supabaseStorageService');
+
+// Resolve photo_url to signed URL for each memo's author employee
+async function resolveAuthorPhotos(memos) {
+  if (!storageService.isConfigured()) return;
+  const list = Array.isArray(memos) ? memos : [memos];
+  for (const memo of list) {
+    const photoUrl = memo.author?.employee?.photo_url;
+    if (photoUrl && !photoUrl.startsWith('http')) {
+      try {
+        memo.author.employee.photo_url = await storageService.getSignedUrl(photoUrl, 3600);
+      } catch {
+        memo.author.employee.photo_url = null;
+      }
+    }
+  }
+}
+
+// Common includes for author info + category
+const getStandardIncludes = (company_id) => [
+  {
+    model: User,
+    as: 'author',
+    attributes: ['id', 'email', 'role'],
+    include: [{
+      model: Employee,
+      as: 'employee',
+      attributes: ['full_name', 'position', 'department', 'photo_url'],
+      where: { company_id },
+      required: false
+    }]
+  },
+  {
+    model: AnnouncementCategory,
+    as: 'category',
+    attributes: ['id', 'name', 'slug', 'color', 'icon']
+  }
+];
 
 // Create a new memo
 exports.createMemo = async (req, res) => {
@@ -14,6 +82,8 @@ exports.createMemo = async (req, res) => {
       summary,
       status,
       priority,
+      category_id,
+      is_pinned,
       target_audience,
       target_departments,
       target_positions,
@@ -28,6 +98,10 @@ exports.createMemo = async (req, res) => {
       content,
       summary,
       author_id: req.user.id,
+      company_id: req.user.company_id,
+      category_id: category_id || null,
+      is_pinned: is_pinned || false,
+      pinned_at: is_pinned ? new Date() : null,
       status: status || 'Draft',
       priority: priority || 'Normal',
       target_audience: target_audience || 'All',
@@ -40,25 +114,46 @@ exports.createMemo = async (req, res) => {
     });
 
     const createdMemo = await Memo.findByPk(memo.id, {
-      include: [
-        {
-          model: User,
-          as: 'author',
-          attributes: ['id', 'email', 'full_name']
-        }
-      ]
+      include: getStandardIncludes(req.user.company_id)
     });
+
+    // Notify employees if memo is published
+    if (memo.status === 'Published') {
+      const empWhere = { company_id: req.user.company_id };
+      if (memo.target_audience === 'Department' && memo.target_departments?.length) {
+        empWhere.department = { [Op.in]: memo.target_departments };
+      } else if (memo.target_audience === 'Position' && memo.target_positions?.length) {
+        empWhere.position = { [Op.in]: memo.target_positions };
+      } else if (memo.target_audience === 'Specific' && memo.target_employee_ids?.length) {
+        empWhere.id = { [Op.in]: memo.target_employee_ids };
+      }
+      const targetEmployees = await Employee.findAll({ where: empWhere, attributes: ['user_id'] });
+      const userIds = targetEmployees.map(e => e.user_id).filter(Boolean);
+      if (userIds.length) {
+        notificationService.createBulkNotifications(
+          userIds,
+          req.user.company_id,
+          'announcement_published',
+          'New Announcement',
+          memo.title,
+          { memo_id: memo.id, link: '/communication' }
+        );
+      }
+    }
+
+    const createdJson = createdMemo.toJSON();
+    await resolveAuthorPhotos([createdJson]);
 
     res.status(201).json({
       success: true,
-      message: 'Memo created successfully',
-      data: createdMemo
+      message: 'Announcement created successfully',
+      data: createdJson
     });
   } catch (error) {
     console.error('Error creating memo:', error);
     res.status(500).json({
       success: false,
-      message: 'Error creating memo',
+      message: 'Error creating announcement',
       error: error.message
     });
   }
@@ -72,28 +167,37 @@ exports.getAllMemos = async (req, res) => {
       limit = 10,
       status,
       priority,
+      category_id,
       target_audience,
       search,
       author_id,
+      date_from,
+      date_to,
+      sort_by = 'newest',
       include_expired
     } = req.query;
 
     const offset = (parseInt(page) - 1) * parseInt(limit);
+    const company_id = req.user.company_id;
 
     // Build where clause
-    const whereClause = {};
+    const whereClause = { company_id };
 
     // Filter by status
     if (status) {
       whereClause.status = status;
     } else {
-      // Default: don't show archived
       whereClause.status = { [Op.ne]: 'Archived' };
     }
 
     // Filter by priority
     if (priority) {
       whereClause.priority = priority;
+    }
+
+    // Filter by category
+    if (category_id) {
+      whereClause.category_id = parseInt(category_id);
     }
 
     // Filter by target audience
@@ -109,72 +213,90 @@ exports.getAllMemos = async (req, res) => {
     // Search in title and summary
     if (search) {
       whereClause[Op.or] = [
-        { title: { [Op.like]: `%${search}%` } },
-        { summary: { [Op.like]: `%${search}%` } }
+        { title: { [Op.iLike]: `%${search}%` } },
+        { summary: { [Op.iLike]: `%${search}%` } }
       ];
+    }
+
+    // Date range filter on published_at
+    if (date_from || date_to) {
+      whereClause.published_at = {};
+      if (date_from) whereClause.published_at[Op.gte] = new Date(date_from);
+      if (date_to) whereClause.published_at[Op.lte] = new Date(date_to);
     }
 
     // Filter expired memos
     if (!include_expired || include_expired === 'false') {
-      whereClause[Op.or] = [
-        { expires_at: null },
-        { expires_at: { [Op.gte]: new Date() } }
-      ];
+      // Combine with existing Op.or if search is present
+      const expiryCondition = {
+        [Op.or]: [
+          { expires_at: null },
+          { expires_at: { [Op.gte]: new Date() } }
+        ]
+      };
+      if (whereClause[Op.or]) {
+        // Wrap search and expiry together under Op.and
+        const searchCondition = whereClause[Op.or];
+        delete whereClause[Op.or];
+        whereClause[Op.and] = [
+          { [Op.or]: searchCondition },
+          expiryCondition
+        ];
+      } else {
+        Object.assign(whereClause, expiryCondition);
+      }
     }
 
     // Role-based filtering: Staff can only see published memos targeted to them
     if (req.user.role === 'staff') {
       whereClause.status = 'Published';
 
-      // Get employee record
       const employee = await Employee.findOne({
-        where: { user_id: req.user.id }
+        where: { user_id: req.user.id, company_id }
       });
 
       if (employee) {
-        whereClause[Op.or] = [
-          { target_audience: 'All' },
-          {
-            target_audience: 'Department',
-            target_departments: { [Op.like]: `%${employee.department}%` }
-          },
-          {
-            target_audience: 'Position',
-            target_positions: { [Op.like]: `%${employee.position}%` }
-          },
-          {
-            target_audience: 'Specific',
-            target_employee_ids: { [Op.like]: `%${employee.id}%` }
-          }
-        ];
+        const targetConditions = buildTargetConditions(employee);
+
+        if (whereClause[Op.and]) {
+          whereClause[Op.and].push({ [Op.or]: targetConditions });
+        } else {
+          whereClause[Op.and] = [{ [Op.or]: targetConditions }];
+        }
       }
     }
 
-    // Count total matching records
+    // Build sort order
+    let order;
+    switch (sort_by) {
+      case 'oldest':
+        order = [['is_pinned', 'DESC'], ['pinned_at', 'DESC NULLS LAST'], ['published_at', 'ASC'], ['created_at', 'ASC']];
+        break;
+      case 'priority':
+        order = [['is_pinned', 'DESC'], ['pinned_at', 'DESC NULLS LAST'], ['priority', 'DESC'], ['published_at', 'DESC']];
+        break;
+      case 'newest':
+      default:
+        order = [['is_pinned', 'DESC'], ['pinned_at', 'DESC NULLS LAST'], ['published_at', 'DESC NULLS LAST'], ['created_at', 'DESC']];
+        break;
+    }
+
     const totalCount = await Memo.count({ where: whereClause });
 
-    // Fetch memos with pagination
     const memos = await Memo.findAll({
       where: whereClause,
-      include: [
-        {
-          model: User,
-          as: 'author',
-          attributes: ['id', 'email', 'role']
-        }
-      ],
-      order: [
-        ['priority', 'DESC'],
-        ['published_at', 'DESC'],
-        ['created_at', 'DESC']
-      ],
+      include: getStandardIncludes(company_id),
+      order,
       limit: parseInt(limit),
-      offset: offset
+      offset
     });
+
+    const memosJson = memos.map(m => m.toJSON());
+    await resolveAuthorPhotos(memosJson);
 
     res.json({
       success: true,
-      data: memos,
+      data: memosJson,
       pagination: {
         total: totalCount,
         page: parseInt(page),
@@ -186,9 +308,91 @@ exports.getAllMemos = async (req, res) => {
     console.error('Error fetching memos:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching memos',
+      message: 'Error fetching announcements',
       error: error.message
     });
+  }
+};
+
+// Get pinned memos for the company
+exports.getPinnedMemos = async (req, res) => {
+  try {
+    const company_id = req.user.company_id;
+
+    const whereClause = {
+      company_id,
+      is_pinned: true,
+      status: 'Published'
+    };
+
+    // Staff: only see targeted memos
+    if (req.user.role === 'staff') {
+      const employee = await Employee.findOne({
+        where: { user_id: req.user.id, company_id }
+      });
+
+      if (employee) {
+        whereClause[Op.or] = buildTargetConditions(employee);
+      }
+    }
+
+    const memos = await Memo.findAll({
+      where: whereClause,
+      include: getStandardIncludes(company_id),
+      order: [['pinned_at', 'DESC']],
+      limit: 10
+    });
+
+    const memosJson = memos.map(m => m.toJSON());
+    await resolveAuthorPhotos(memosJson);
+
+    res.json({
+      success: true,
+      data: memosJson
+    });
+  } catch (error) {
+    console.error('Error fetching pinned memos:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching pinned announcements',
+      error: error.message
+    });
+  }
+};
+
+// Toggle pin/unpin a memo
+exports.togglePin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const company_id = req.user.company_id;
+
+    const memo = await Memo.findOne({ where: { id, company_id } });
+
+    if (!memo) {
+      return res.status(404).json({ success: false, message: 'Announcement not found' });
+    }
+
+    const newPinned = !memo.is_pinned;
+    await memo.update({
+      is_pinned: newPinned,
+      pinned_at: newPinned ? new Date() : null
+    });
+
+    const updatedMemo = await Memo.findByPk(id, {
+      include: getStandardIncludes(company_id)
+    });
+
+    const updatedJson = updatedMemo.toJSON();
+    await resolveAuthorPhotos([updatedJson]);
+
+    res.json({
+      success: true,
+      message: newPinned ? 'Announcement pinned' : 'Announcement unpinned',
+      data: updatedJson
+    });
+  } catch (error) {
+    console.error('Error toggling pin:', error);
+    res.status(500).json({ success: false, message: 'Error toggling pin', error: error.message });
   }
 };
 
@@ -196,14 +400,12 @@ exports.getAllMemos = async (req, res) => {
 exports.getMemoById = async (req, res) => {
   try {
     const { id } = req.params;
+    const company_id = req.user.company_id;
 
-    const memo = await Memo.findByPk(id, {
+    const memo = await Memo.findOne({
+      where: { id, company_id },
       include: [
-        {
-          model: User,
-          as: 'author',
-          attributes: ['id', 'email', 'full_name']
-        },
+        ...getStandardIncludes(company_id),
         {
           model: MemoReadReceipt,
           as: 'read_receipts',
@@ -221,7 +423,7 @@ exports.getMemoById = async (req, res) => {
     if (!memo) {
       return res.status(404).json({
         success: false,
-        message: 'Memo not found'
+        message: 'Announcement not found'
       });
     }
 
@@ -230,13 +432,12 @@ exports.getMemoById = async (req, res) => {
       if (memo.status !== 'Published') {
         return res.status(403).json({
           success: false,
-          message: 'You do not have permission to view this memo'
+          message: 'You do not have permission to view this announcement'
         });
       }
 
-      // Check if memo is targeted to this employee
       const employee = await Employee.findOne({
-        where: { user_id: req.user.id }
+        where: { user_id: req.user.id, company_id }
       });
 
       if (employee) {
@@ -252,7 +453,7 @@ exports.getMemoById = async (req, res) => {
         if (!isTargeted) {
           return res.status(403).json({
             success: false,
-            message: 'This memo is not targeted to you'
+            message: 'This announcement is not targeted to you'
           });
         }
       }
@@ -261,39 +462,36 @@ exports.getMemoById = async (req, res) => {
     // Increment view count
     await memo.increment('view_count');
 
-    // Create or update read receipt if staff
-    if (req.user.role === 'staff') {
-      const employee = await Employee.findOne({
-        where: { user_id: req.user.id }
+    // Create or update read receipt
+    if (req.user.employee_id) {
+      const [receipt, created] = await MemoReadReceipt.findOrCreate({
+        where: {
+          memo_id: id,
+          employee_id: req.user.employee_id
+        },
+        defaults: {
+          read_at: new Date(),
+          ip_address: req.ip
+        }
       });
 
-      if (employee) {
-        const [receipt, created] = await MemoReadReceipt.findOrCreate({
-          where: {
-            memo_id: id,
-            employee_id: employee.id
-          },
-          defaults: {
-            read_at: new Date(),
-            ip_address: req.ip
-          }
-        });
-
-        if (!created) {
-          await receipt.update({ read_at: new Date() });
-        }
+      if (!created) {
+        await receipt.update({ read_at: new Date() });
       }
     }
 
+    const memoJson = memo.toJSON();
+    await resolveAuthorPhotos([memoJson]);
+
     res.json({
       success: true,
-      data: memo
+      data: memoJson
     });
   } catch (error) {
     console.error('Error fetching memo:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching memo',
+      message: 'Error fetching announcement',
       error: error.message
     });
   }
@@ -303,12 +501,15 @@ exports.getMemoById = async (req, res) => {
 exports.updateMemo = async (req, res) => {
   try {
     const { id } = req.params;
+    const company_id = req.user.company_id;
     const {
       title,
       content,
       summary,
       status,
       priority,
+      category_id,
+      is_pinned,
       target_audience,
       target_departments,
       target_positions,
@@ -317,20 +518,20 @@ exports.updateMemo = async (req, res) => {
       requires_acknowledgment
     } = req.body;
 
-    const memo = await Memo.findByPk(id);
+    const memo = await Memo.findOne({ where: { id, company_id } });
 
     if (!memo) {
       return res.status(404).json({
         success: false,
-        message: 'Memo not found'
+        message: 'Announcement not found'
       });
     }
 
     // Check permissions: only author or admin can update
-    if (req.user.role !== 'admin' && memo.author_id !== req.user.id) {
+    if (!['super_admin', 'admin'].includes(req.user.role) && memo.author_id !== req.user.id) {
       return res.status(403).json({
         success: false,
-        message: 'You do not have permission to update this memo'
+        message: 'You do not have permission to update this announcement'
       });
     }
 
@@ -347,6 +548,13 @@ exports.updateMemo = async (req, res) => {
       requires_acknowledgment
     };
 
+    if (category_id !== undefined) updateData.category_id = category_id || null;
+
+    if (is_pinned !== undefined) {
+      updateData.is_pinned = is_pinned;
+      updateData.pinned_at = is_pinned ? (memo.pinned_at || new Date()) : null;
+    }
+
     // Handle status change to Published
     if (status && status !== memo.status) {
       updateData.status = status;
@@ -357,26 +565,48 @@ exports.updateMemo = async (req, res) => {
 
     await memo.update(updateData);
 
+    // Notify employees if memo was just published
+    if (updateData.status === 'Published' && memo.status === 'Published') {
+      const empWhere = { company_id: company_id };
+      const audience = memo.target_audience;
+      if (audience === 'Department' && memo.target_departments?.length) {
+        empWhere.department = { [Op.in]: memo.target_departments };
+      } else if (audience === 'Position' && memo.target_positions?.length) {
+        empWhere.position = { [Op.in]: memo.target_positions };
+      } else if (audience === 'Specific' && memo.target_employee_ids?.length) {
+        empWhere.id = { [Op.in]: memo.target_employee_ids };
+      }
+      const targetEmployees = await Employee.findAll({ where: empWhere, attributes: ['user_id'] });
+      const userIds = targetEmployees.map(e => e.user_id).filter(Boolean);
+      if (userIds.length) {
+        notificationService.createBulkNotifications(
+          userIds,
+          company_id,
+          'announcement_published',
+          'New Announcement',
+          memo.title,
+          { memo_id: memo.id, link: '/communication' }
+        );
+      }
+    }
+
     const updatedMemo = await Memo.findByPk(id, {
-      include: [
-        {
-          model: User,
-          as: 'author',
-          attributes: ['id', 'email', 'full_name']
-        }
-      ]
+      include: getStandardIncludes(company_id)
     });
+
+    const updatedJson = updatedMemo.toJSON();
+    await resolveAuthorPhotos([updatedJson]);
 
     res.json({
       success: true,
-      message: 'Memo updated successfully',
-      data: updatedMemo
+      message: 'Announcement updated successfully',
+      data: updatedJson
     });
   } catch (error) {
     console.error('Error updating memo:', error);
     res.status(500).json({
       success: false,
-      message: 'Error updating memo',
+      message: 'Error updating announcement',
       error: error.message
     });
   }
@@ -386,21 +616,22 @@ exports.updateMemo = async (req, res) => {
 exports.deleteMemo = async (req, res) => {
   try {
     const { id } = req.params;
+    const company_id = req.user.company_id;
 
-    const memo = await Memo.findByPk(id);
+    const memo = await Memo.findOne({ where: { id, company_id } });
 
     if (!memo) {
       return res.status(404).json({
         success: false,
-        message: 'Memo not found'
+        message: 'Announcement not found'
       });
     }
 
     // Only admin or author can delete
-    if (req.user.role !== 'admin' && memo.author_id !== req.user.id) {
+    if (!['super_admin', 'admin'].includes(req.user.role) && memo.author_id !== req.user.id) {
       return res.status(403).json({
         success: false,
-        message: 'You do not have permission to delete this memo'
+        message: 'You do not have permission to delete this announcement'
       });
     }
 
@@ -408,13 +639,13 @@ exports.deleteMemo = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Memo deleted successfully'
+      message: 'Announcement deleted successfully'
     });
   } catch (error) {
     console.error('Error deleting memo:', error);
     res.status(500).json({
       success: false,
-      message: 'Error deleting memo',
+      message: 'Error deleting announcement',
       error: error.message
     });
   }
@@ -424,26 +655,26 @@ exports.deleteMemo = async (req, res) => {
 exports.acknowledgeMemo = async (req, res) => {
   try {
     const { id } = req.params;
+    const company_id = req.user.company_id;
 
-    const memo = await Memo.findByPk(id);
+    const memo = await Memo.findOne({ where: { id, company_id } });
 
     if (!memo) {
       return res.status(404).json({
         success: false,
-        message: 'Memo not found'
+        message: 'Announcement not found'
       });
     }
 
     if (!memo.requires_acknowledgment) {
       return res.status(400).json({
         success: false,
-        message: 'This memo does not require acknowledgment'
+        message: 'This announcement does not require acknowledgment'
       });
     }
 
-    // Get employee
     const employee = await Employee.findOne({
-      where: { user_id: req.user.id }
+      where: { user_id: req.user.id, company_id }
     });
 
     if (!employee) {
@@ -453,7 +684,6 @@ exports.acknowledgeMemo = async (req, res) => {
       });
     }
 
-    // Find or create read receipt
     const [receipt, created] = await MemoReadReceipt.findOrCreate({
       where: {
         memo_id: id,
@@ -472,20 +702,19 @@ exports.acknowledgeMemo = async (req, res) => {
         ip_address: req.ip
       });
 
-      // Increment acknowledgment count
       await memo.increment('acknowledgment_count');
     }
 
     res.json({
       success: true,
-      message: 'Memo acknowledged successfully',
+      message: 'Announcement acknowledged successfully',
       data: receipt
     });
   } catch (error) {
     console.error('Error acknowledging memo:', error);
     res.status(500).json({
       success: false,
-      message: 'Error acknowledging memo',
+      message: 'Error acknowledging announcement',
       error: error.message
     });
   }
@@ -495,8 +724,10 @@ exports.acknowledgeMemo = async (req, res) => {
 exports.getMemoStatistics = async (req, res) => {
   try {
     const { id } = req.params;
+    const company_id = req.user.company_id;
 
-    const memo = await Memo.findByPk(id, {
+    const memo = await Memo.findOne({
+      where: { id, company_id },
       include: [
         {
           model: MemoReadReceipt,
@@ -515,29 +746,28 @@ exports.getMemoStatistics = async (req, res) => {
     if (!memo) {
       return res.status(404).json({
         success: false,
-        message: 'Memo not found'
+        message: 'Announcement not found'
       });
     }
 
     // Check permissions
-    if (req.user.role !== 'admin' && req.user.role !== 'manager' && memo.author_id !== req.user.id) {
+    if (!['super_admin', 'admin', 'manager'].includes(req.user.role) && memo.author_id !== req.user.id) {
       return res.status(403).json({
         success: false,
         message: 'You do not have permission to view statistics'
       });
     }
 
-    // Calculate statistics
     const totalReads = memo.read_receipts.length;
     const totalAcknowledgments = memo.read_receipts.filter(r => r.acknowledged_at).length;
 
-    // Get target count
     let targetCount = 0;
     if (memo.target_audience === 'All') {
-      targetCount = await Employee.count({ where: { employment_status: 'Active' } });
+      targetCount = await Employee.count({ where: { company_id, employment_status: 'Active' } });
     } else if (memo.target_audience === 'Department') {
       targetCount = await Employee.count({
         where: {
+          company_id,
           department: { [Op.in]: memo.target_departments || [] },
           employment_status: 'Active'
         }
@@ -545,6 +775,7 @@ exports.getMemoStatistics = async (req, res) => {
     } else if (memo.target_audience === 'Position') {
       targetCount = await Employee.count({
         where: {
+          company_id,
           position: { [Op.in]: memo.target_positions || [] },
           employment_status: 'Active'
         }
@@ -574,7 +805,7 @@ exports.getMemoStatistics = async (req, res) => {
     console.error('Error fetching memo statistics:', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching memo statistics',
+      message: 'Error fetching statistics',
       error: error.message
     });
   }

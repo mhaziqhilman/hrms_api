@@ -395,31 +395,79 @@ exports.getEmployeeYTD = async (req, res, next) => {
       });
     }
 
-    const ytdData = await YTDStatutory.findOne({
+    const ytdRecords = await YTDStatutory.findAll({
       where: {
         employee_id: id,
         year: parseInt(year)
-      }
+      },
+      order: [['month', 'ASC']]
     });
 
-    if (!ytdData) {
-      return res.status(404).json({
-        success: false,
-        message: `No YTD data found for year ${year}`
+    if (!ytdRecords || ytdRecords.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: null
       });
     }
+
+    // Build monthly breakdown and aggregate totals
+    const monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+
+    const totals = {
+      gross_pay: 0, epf_employee: 0, epf_employer: 0,
+      socso_employee: 0, socso_employer: 0, eis_employee: 0,
+      eis_employer: 0, pcb: 0, net_pay: 0
+    };
+
+    const monthly_breakdown = ytdRecords.map(record => {
+      const gross = parseFloat(record.gross_salary) || 0;
+      const epfEmp = parseFloat(record.employee_epf) || 0;
+      const epfEr = parseFloat(record.employer_epf) || 0;
+      const socsoEmp = parseFloat(record.employee_socso) || 0;
+      const socsoEr = parseFloat(record.employer_socso) || 0;
+      const eisEmp = parseFloat(record.employee_eis) || 0;
+      const eisEr = parseFloat(record.employer_eis) || 0;
+      const pcb = parseFloat(record.pcb_deduction) || 0;
+      const net = parseFloat(record.net_salary) || 0;
+
+      totals.gross_pay += gross;
+      totals.epf_employee += epfEmp;
+      totals.epf_employer += epfEr;
+      totals.socso_employee += socsoEmp;
+      totals.socso_employer += socsoEr;
+      totals.eis_employee += eisEmp;
+      totals.eis_employer += eisEr;
+      totals.pcb += pcb;
+      totals.net_pay += net;
+
+      return {
+        month: record.month,
+        month_name: monthNames[record.month - 1] || '',
+        gross_pay: gross,
+        epf_employee: epfEmp,
+        epf_employer: epfEr,
+        socso_employee: socsoEmp,
+        socso_employer: socsoEr,
+        eis_employee: eisEmp,
+        eis_employer: eisEr,
+        pcb: pcb,
+        net_pay: net
+      };
+    });
 
     logger.info(`YTD data retrieved for employee ${id}, year ${year}`);
 
     res.status(200).json({
       success: true,
       data: {
-        employee: {
-          id: employee.id,
-          employee_id: employee.employee_id,
-          full_name: employee.full_name
-        },
-        ytd: ytdData
+        year: parseInt(year),
+        employee_id: employee.id,
+        employee_name: employee.full_name,
+        totals,
+        monthly_breakdown
       }
     });
   } catch (error) {
@@ -501,11 +549,27 @@ exports.getOwnProfile = async (req, res, next) => {
       });
     }
 
+    // Convert raw storage path to signed URL for photo_url
+    const profileData = employee.toJSON();
+    if (profileData.photo_url) {
+      try {
+        const storageService = require('../services/supabaseStorageService');
+        if (storageService.isConfigured()) {
+          profileData.photo_url = await storageService.getSignedUrl(profileData.photo_url, 3600);
+        } else {
+          profileData.photo_url = null;
+        }
+      } catch (err) {
+        logger.warn(`Failed to get signed URL for profile picture: ${err.message}`);
+        profileData.photo_url = null;
+      }
+    }
+
     logger.info(`Own profile retrieved for employee ${employee.id}`);
 
     res.status(200).json({
       success: true,
-      data: employee
+      data: profileData
     });
   } catch (error) {
     logger.error('Error fetching own profile:', error);

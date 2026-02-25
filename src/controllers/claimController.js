@@ -3,6 +3,7 @@ const ClaimType = require('../models/ClaimType');
 const Employee = require('../models/Employee');
 const User = require('../models/User');
 const { Op } = require('sequelize');
+const notificationService = require('../services/notificationService');
 
 // Submit a new claim
 exports.submitClaim = async (req, res) => {
@@ -365,6 +366,25 @@ exports.managerApproval = async (req, res) => {
 
     await claim.save();
 
+    // Send notification to claim applicant
+    const claimEmployee = await Employee.findByPk(claim.employee_id, { attributes: ['user_id'] });
+    if (claimEmployee?.user_id) {
+      const notifType = action === 'approve' ? 'claim_approved' : 'claim_rejected';
+      const notifTitle = action === 'approve' ? 'Claim Approved by Manager' : 'Claim Rejected';
+      const notifMessage = action === 'approve'
+        ? `Your claim of RM${claim.amount} has been approved by manager.`
+        : `Your claim of RM${claim.amount} has been rejected.${rejection_reason ? ' Reason: ' + rejection_reason : ''}`;
+
+      notificationService.createNotification(
+        claimEmployee.user_id,
+        req.user.company_id,
+        notifType,
+        notifTitle,
+        notifMessage,
+        { claim_id: claim.id, link: '/claims' }
+      );
+    }
+
     // Fetch updated claim with associations
     const updatedClaim = await Claim.findByPk(claim.id, {
       include: [
@@ -471,6 +491,34 @@ exports.financeApproval = async (req, res) => {
     }
 
     await claim.save();
+
+    // Send notification to claim applicant
+    const finClaimEmployee = await Employee.findByPk(claim.employee_id, { attributes: ['user_id'] });
+    if (finClaimEmployee?.user_id) {
+      let notifType, notifTitle, notifMessage;
+      if (action === 'approve') {
+        notifType = 'claim_finance_approved';
+        notifTitle = 'Claim Approved by Finance';
+        notifMessage = `Your claim of RM${claim.amount} has been approved by finance.`;
+      } else if (action === 'reject') {
+        notifType = 'claim_finance_rejected';
+        notifTitle = 'Claim Rejected by Finance';
+        notifMessage = `Your claim of RM${claim.amount} has been rejected by finance.${rejection_reason ? ' Reason: ' + rejection_reason : ''}`;
+      } else {
+        notifType = 'claim_finance_approved';
+        notifTitle = 'Claim Paid';
+        notifMessage = `Your claim of RM${claim.amount} has been marked as paid.${payment_reference ? ' Ref: ' + payment_reference : ''}`;
+      }
+
+      notificationService.createNotification(
+        finClaimEmployee.user_id,
+        req.user.company_id,
+        notifType,
+        notifTitle,
+        notifMessage,
+        { claim_id: claim.id, link: '/claims' }
+      );
+    }
 
     // Fetch updated claim with associations
     const updatedClaim = await Claim.findByPk(claim.id, {
@@ -687,6 +735,108 @@ exports.getClaimsSummary = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching claims summary',
+      error: error.message
+    });
+  }
+};
+
+// Get claims analytics for the list page
+exports.getClaimsAnalytics = async (req, res) => {
+  try {
+    const companyId = req.user.company_id;
+
+    // Current month boundaries
+    const now = new Date();
+    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const currentMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+
+    // Last month boundaries
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+
+    // Base where clause scoped to company via employee
+    const companyEmployeeInclude = {
+      model: Employee,
+      as: 'employee',
+      attributes: [],
+      where: { company_id: companyId },
+      required: true
+    };
+
+    // For staff, scope to own claims only
+    let employeeFilter = {};
+    if (req.user.role === 'staff') {
+      const employee = await Employee.findOne({ where: { user_id: req.user.id, company_id: companyId } });
+      if (!employee) {
+        return res.json({
+          success: true,
+          data: {
+            status: { total: 0, approved: 0, rejected: 0, pending: 0 },
+            status_prev: { total: 0, approved: 0, rejected: 0, pending: 0 },
+            by_type: []
+          }
+        });
+      }
+      employeeFilter = { employee_id: employee.id };
+    }
+
+    // Current month claims
+    const currentClaims = await Claim.findAll({
+      where: {
+        ...employeeFilter,
+        created_at: { [Op.between]: [currentMonthStart, currentMonthEnd] }
+      },
+      include: [companyEmployeeInclude, { model: ClaimType, as: 'claimType', attributes: ['id', 'name'] }],
+      attributes: ['id', 'status', 'claim_type_id']
+    });
+
+    // Last month claims
+    const prevClaims = await Claim.findAll({
+      where: {
+        ...employeeFilter,
+        created_at: { [Op.between]: [lastMonthStart, lastMonthEnd] }
+      },
+      include: [{
+        model: Employee, as: 'employee', attributes: [],
+        where: { company_id: companyId }, required: true
+      }],
+      attributes: ['id', 'status']
+    });
+
+    const countByStatus = (claims) => {
+      const result = { total: claims.length, approved: 0, rejected: 0, pending: 0 };
+      claims.forEach(c => {
+        if (['Manager_Approved', 'Finance_Approved', 'Paid'].includes(c.status)) result.approved++;
+        else if (c.status === 'Rejected') result.rejected++;
+        else if (c.status === 'Pending') result.pending++;
+      });
+      return result;
+    };
+
+    const status = countByStatus(currentClaims);
+    const statusPrev = countByStatus(prevClaims);
+
+    // By claim type (current month)
+    const typeMap = {};
+    currentClaims.forEach(c => {
+      const name = c.claimType?.name || 'Unknown';
+      if (!typeMap[name]) typeMap[name] = 0;
+      typeMap[name]++;
+    });
+
+    const byType = Object.entries(typeMap)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+
+    res.json({
+      success: true,
+      data: { status, status_prev: statusPrev, by_type: byType }
+    });
+  } catch (error) {
+    console.error('Error fetching claims analytics:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching claims analytics',
       error: error.message
     });
   }

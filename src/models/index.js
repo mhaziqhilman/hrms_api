@@ -22,6 +22,8 @@ const UserSettings = require('./UserSettings');
 const PublicHoliday = require('./PublicHoliday');
 const StatutoryConfig = require('./StatutoryConfig');
 const EmailTemplate = require('./EmailTemplate');
+const AnnouncementCategory = require('./AnnouncementCategory');
+const Notification = require('./Notification');
 
 // Define associations
 
@@ -125,6 +127,10 @@ Claim.belongsTo(User, { foreignKey: 'manager_approved_by', as: 'managerApprover'
 User.hasMany(Claim, { foreignKey: 'finance_approved_by', as: 'finance_approved_claims' });
 Claim.belongsTo(User, { foreignKey: 'finance_approved_by', as: 'financeApprover' });
 
+// Company - File (One-to-Many)
+Company.hasMany(File, { foreignKey: 'company_id', as: 'files' });
+File.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
 // User - File (One-to-Many) - uploaded_by
 User.hasMany(File, { foreignKey: 'uploaded_by', as: 'uploaded_files' });
 File.belongsTo(User, { foreignKey: 'uploaded_by', as: 'uploader' });
@@ -144,6 +150,18 @@ File.belongsTo(Leave, { foreignKey: 'related_to_leave_id', as: 'leave' });
 // Employee - Self-referencing (Reporting Manager)
 Employee.hasMany(Employee, { foreignKey: 'reporting_manager_id', as: 'subordinates' });
 Employee.belongsTo(Employee, { foreignKey: 'reporting_manager_id', as: 'manager' });
+
+// Company - AnnouncementCategory (One-to-Many)
+Company.hasMany(AnnouncementCategory, { foreignKey: 'company_id', as: 'announcement_categories' });
+AnnouncementCategory.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+// Company - Memo (One-to-Many)
+Company.hasMany(Memo, { foreignKey: 'company_id', as: 'memos' });
+Memo.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+// Memo - AnnouncementCategory (Many-to-One)
+AnnouncementCategory.hasMany(Memo, { foreignKey: 'category_id', as: 'memos' });
+Memo.belongsTo(AnnouncementCategory, { foreignKey: 'category_id', as: 'category' });
 
 // Memo - User (author)
 User.hasMany(Memo, { foreignKey: 'author_id', as: 'authored_memos' });
@@ -196,6 +214,14 @@ EmailTemplate.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
 Company.hasMany(LeaveType, { foreignKey: 'company_id', as: 'leave_types' });
 LeaveType.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
 
+// User - Notification (One-to-Many)
+User.hasMany(Notification, { foreignKey: 'user_id', as: 'notifications' });
+Notification.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
+// Company - Notification (One-to-Many)
+Company.hasMany(Notification, { foreignKey: 'company_id', as: 'notifications' });
+Notification.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
 // Sync database
 const syncDatabase = async (options = {}) => {
   try {
@@ -232,5 +258,7 @@ module.exports = {
   PublicHoliday,
   StatutoryConfig,
   EmailTemplate,
+  AnnouncementCategory,
+  Notification,
   syncDatabase
 };

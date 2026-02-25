@@ -1,9 +1,10 @@
 const jwt = require('jsonwebtoken');
 const jwtConfig = require('../config/jwt');
-const { User, Company, UserCompany, Invitation } = require('../models');
+const { User, Company, UserCompany, Invitation, Employee } = require('../models');
 const { Op } = require('sequelize');
 const invitationService = require('../services/invitationService');
 const { linkEmployeeToUser } = invitationService;
+const notificationService = require('../services/notificationService');
 const logger = require('../utils/logger');
 
 /**
@@ -82,6 +83,29 @@ const acceptInvitation = async (req, res, next) => {
     }
 
     const user = await invitationService.acceptInvitation(token, req.user.id);
+
+    // Notify admin/managers of the company about the new team member
+    if (user.company_id) {
+      const adminUsers = await User.findAll({
+        where: {
+          company_id: user.company_id,
+          role: { [Op.in]: ['super_admin', 'admin', 'manager'] },
+          id: { [Op.ne]: user.id }
+        },
+        attributes: ['id']
+      });
+      const adminIds = adminUsers.map(u => u.id);
+      if (adminIds.length) {
+        notificationService.createBulkNotifications(
+          adminIds,
+          user.company_id,
+          'team_member_joined',
+          'New Team Member',
+          `${user.email} has joined the company.`,
+          { user_id: user.id, link: '/employees' }
+        );
+      }
+    }
 
     // Generate new token with updated company_id
     const authToken = generateToken(user);

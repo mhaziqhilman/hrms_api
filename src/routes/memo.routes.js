@@ -34,6 +34,12 @@ const createMemoValidation = [
   body('priority')
     .optional()
     .isIn(['Low', 'Normal', 'High', 'Urgent']).withMessage('Invalid priority'),
+  body('category_id')
+    .optional()
+    .isInt().withMessage('Category ID must be an integer'),
+  body('is_pinned')
+    .optional()
+    .isBoolean().withMessage('Is pinned must be a boolean'),
   body('target_audience')
     .optional()
     .isIn(['All', 'Department', 'Position', 'Specific']).withMessage('Invalid target audience'),
@@ -59,6 +65,12 @@ const createMemoValidation = [
 
 const updateMemoValidation = [
   param('id').isInt().withMessage('Memo ID must be an integer'),
+  body('category_id')
+    .optional()
+    .isInt().withMessage('Category ID must be an integer'),
+  body('is_pinned')
+    .optional()
+    .isBoolean().withMessage('Is pinned must be a boolean'),
   body('title')
     .optional()
     .notEmpty().withMessage('Title cannot be empty')
@@ -123,18 +135,30 @@ const queryValidation = [
     .isInt().withMessage('Author ID must be an integer'),
   query('include_expired')
     .optional()
-    .isBoolean().withMessage('Include expired must be a boolean')
+    .isBoolean().withMessage('Include expired must be a boolean'),
+  query('category_id')
+    .optional()
+    .isInt().withMessage('Category ID must be an integer'),
+  query('date_from')
+    .optional()
+    .isISO8601().withMessage('Date from must be a valid date'),
+  query('date_to')
+    .optional()
+    .isISO8601().withMessage('Date to must be a valid date'),
+  query('sort_by')
+    .optional()
+    .isIn(['newest', 'oldest', 'priority']).withMessage('Invalid sort option')
 ];
 
 /**
  * @route   POST /api/memos
  * @desc    Create a new memo
- * @access  Private (Admin, Manager)
+ * @access  Private (Admin)
  */
 router.post(
   '/',
   verifyToken,
-  requireManager,
+  requireAdmin,
   createMemoValidation,
   validate,
   memoController.createMemo
@@ -151,6 +175,31 @@ router.get(
   queryValidation,
   validate,
   memoController.getAllMemos
+);
+
+/**
+ * @route   GET /api/memos/pinned
+ * @desc    Get pinned announcements
+ * @access  Private (All authenticated users)
+ */
+router.get(
+  '/pinned',
+  verifyToken,
+  memoController.getPinnedMemos
+);
+
+/**
+ * @route   POST /api/memos/:id/toggle-pin
+ * @desc    Pin or unpin an announcement
+ * @access  Private (Admin)
+ */
+router.post(
+  '/:id/toggle-pin',
+  verifyToken,
+  requireAdmin,
+  idParamValidation,
+  validate,
+  memoController.togglePin
 );
 
 /**

@@ -52,10 +52,88 @@ const queryValidation = [
 router.post(
   '/upload',
   verifyToken,
-  upload.array('files', 10), // Accept up to 10 files with field name 'files'
+  upload.array('files', 10),
   uploadValidation,
   validate,
   fileController.uploadFiles
+);
+
+/**
+ * @route   GET /api/files/overview
+ * @desc    Get document overview stats for admin dashboard
+ * @access  Private (Admin only)
+ */
+router.get(
+  '/overview',
+  verifyToken,
+  requireAdmin,
+  fileController.getDocumentOverview
+);
+
+/**
+ * @route   GET /api/files/stats/storage
+ * @desc    Get storage statistics
+ * @access  Private (Admin only)
+ */
+router.get(
+  '/stats/storage',
+  verifyToken,
+  requireAdmin,
+  fileController.getStorageStats
+);
+
+/**
+ * @route   GET /api/files/my-documents
+ * @desc    Get all documents belonging to the current user
+ * @access  Private (All authenticated users)
+ */
+router.get(
+  '/my-documents',
+  verifyToken,
+  queryValidation,
+  validate,
+  fileController.getMyDocuments
+);
+
+/**
+ * @route   GET /api/files/employee/:employee_id
+ * @desc    Get files by employee ID
+ * @access  Private (Admin, Manager, Owner)
+ */
+router.get(
+  '/employee/:employee_id',
+  verifyToken,
+  employeeIdParamValidation,
+  queryValidation,
+  validate,
+  fileController.getFilesByEmployee
+);
+
+/**
+ * @route   GET /api/files/claim/:claim_id
+ * @desc    Get files by claim ID
+ * @access  Private (Admin, Manager, Owner)
+ */
+router.get(
+  '/claim/:claim_id',
+  verifyToken,
+  claimIdParamValidation,
+  queryValidation,
+  validate,
+  fileController.getFilesByClaim
+);
+
+/**
+ * @route   POST /api/files/bulk-delete
+ * @desc    Delete multiple files
+ * @access  Private (Owner, Admin)
+ */
+router.post(
+  '/bulk-delete',
+  verifyToken,
+  body('file_ids').isArray().withMessage('file_ids must be an array'),
+  validate,
+  fileController.bulkDeleteFiles
 );
 
 /**
@@ -124,6 +202,20 @@ router.put(
 );
 
 /**
+ * @route   PATCH /api/files/:id/verify
+ * @desc    Verify or unverify a file
+ * @access  Private (Admin only)
+ */
+router.patch(
+  '/:id/verify',
+  verifyToken,
+  requireAdmin,
+  idParamValidation,
+  validate,
+  fileController.verifyFile
+);
+
+/**
  * @route   DELETE /api/files/:id
  * @desc    Soft delete file
  * @access  Private (Owner, Admin)
@@ -148,59 +240,6 @@ router.delete(
   idParamValidation,
   validate,
   fileController.permanentDeleteFile
-);
-
-/**
- * @route   POST /api/files/bulk-delete
- * @desc    Delete multiple files
- * @access  Private (Owner, Admin)
- */
-router.post(
-  '/bulk-delete',
-  verifyToken,
-  body('file_ids').isArray().withMessage('file_ids must be an array'),
-  validate,
-  fileController.bulkDeleteFiles
-);
-
-/**
- * @route   GET /api/files/employee/:employee_id
- * @desc    Get files by employee ID
- * @access  Private (Admin, Manager, Owner)
- */
-router.get(
-  '/employee/:employee_id',
-  verifyToken,
-  employeeIdParamValidation,
-  queryValidation,
-  validate,
-  fileController.getFilesByEmployee
-);
-
-/**
- * @route   GET /api/files/claim/:claim_id
- * @desc    Get files by claim ID
- * @access  Private (Admin, Manager, Owner)
- */
-router.get(
-  '/claim/:claim_id',
-  verifyToken,
-  claimIdParamValidation,
-  queryValidation,
-  validate,
-  fileController.getFilesByClaim
-);
-
-/**
- * @route   GET /api/files/stats/storage
- * @desc    Get storage statistics
- * @access  Private (Admin only)
- */
-router.get(
-  '/stats/storage',
-  verifyToken,
-  requireAdmin,
-  fileController.getStorageStats
 );
 
 module.exports = router;

@@ -99,6 +99,30 @@ const Memo = sequelize.define('Memo', {
     defaultValue: 0,
     field: 'acknowledgment_count',
     _comment: 'Number of employees who acknowledged'
+  },
+  company_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'companies',
+      key: 'id'
+    }
+  },
+  category_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'announcement_categories',
+      key: 'id'
+    }
+  },
+  is_pinned: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false
+  },
+  pinned_at: {
+    type: DataTypes.DATE,
+    allowNull: true
   }
 }, {
   tableName: 'memos',
@@ -121,6 +145,18 @@ const Memo = sequelize.define('Memo', {
     {
       name: 'idx_memo_priority',
       fields: ['priority']
+    },
+    {
+      name: 'idx_memo_company',
+      fields: ['company_id']
+    },
+    {
+      name: 'idx_memo_category',
+      fields: ['category_id']
+    },
+    {
+      name: 'idx_memo_pinned',
+      fields: ['is_pinned', 'pinned_at']
     }
   ]
 });

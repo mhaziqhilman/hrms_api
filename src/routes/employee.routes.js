@@ -17,7 +17,7 @@ const createEmployeeValidation = [
     .notEmpty().withMessage('Full name is required')
     .isLength({ max: 150 }).withMessage('Full name must not exceed 150 characters'),
   body('ic_no')
-    .optional()
+    .optional({ values: 'falsy' })
     .matches(/^\d{12}$/).withMessage('IC number must be 12 digits'),
   body('gender')
     .notEmpty().withMessage('Gender is required')
@@ -29,44 +29,50 @@ const createEmployeeValidation = [
     .notEmpty().withMessage('Join date is required')
     .isISO8601().withMessage('Join date must be a valid date'),
   body('email')
-    .optional()
+    .optional({ values: 'falsy' })
     .isEmail().withMessage('Must be a valid email address'),
   body('employment_type')
-    .optional()
+    .optional({ values: 'falsy' })
     .isIn(['Permanent', 'Contract', 'Probation', 'Intern'])
-    .withMessage('Invalid employment type')
+    .withMessage('Invalid employment type'),
+  body('reporting_manager_id')
+    .optional({ values: 'falsy' })
+    .isInt({ min: 1 }).withMessage('Reporting manager ID must be a positive integer')
 ];
 
 const updateEmployeeValidation = [
   body('employee_id')
-    .optional()
+    .optional({ values: 'falsy' })
     .isLength({ max: 20 }).withMessage('Employee ID must not exceed 20 characters'),
   body('full_name')
-    .optional()
+    .optional({ values: 'falsy' })
     .isLength({ max: 150 }).withMessage('Full name must not exceed 150 characters'),
   body('ic_no')
-    .optional()
+    .optional({ values: 'falsy' })
     .matches(/^\d{12}$/).withMessage('IC number must be 12 digits'),
   body('gender')
-    .optional()
+    .optional({ values: 'falsy' })
     .isIn(['Male', 'Female']).withMessage('Gender must be Male or Female'),
   body('basic_salary')
-    .optional()
+    .optional({ values: 'falsy' })
     .isDecimal().withMessage('Basic salary must be a valid decimal'),
   body('join_date')
-    .optional()
+    .optional({ values: 'falsy' })
     .isISO8601().withMessage('Join date must be a valid date'),
   body('email')
-    .optional()
+    .optional({ values: 'falsy' })
     .isEmail().withMessage('Must be a valid email address'),
   body('employment_type')
-    .optional()
+    .optional({ values: 'falsy' })
     .isIn(['Permanent', 'Contract', 'Probation', 'Intern'])
     .withMessage('Invalid employment type'),
   body('employment_status')
-    .optional()
+    .optional({ values: 'falsy' })
     .isIn(['Active', 'Resigned', 'Terminated'])
-    .withMessage('Invalid employment status')
+    .withMessage('Invalid employment status'),
+  body('reporting_manager_id')
+    .optional({ values: 'falsy' })
+    .isInt({ min: 1 }).withMessage('Reporting manager ID must be a positive integer')
 ];
 
 const deleteEmployeeValidation = [

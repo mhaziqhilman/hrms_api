@@ -309,13 +309,39 @@ const getAccountInfo = async (req, res, next) => {
       include: [{
         model: Employee,
         as: 'employee',
-        attributes: ['full_name', 'employee_id', 'department', 'position']
+        attributes: ['full_name', 'employee_id', 'department', 'position', 'photo_url']
       }]
     });
 
+    const employee = user.employee;
+
+    // Return photo_url as signed URL if it exists
+    let photo_url = null;
+    if (employee?.photo_url) {
+      try {
+        const storageService = require('../services/supabaseStorageService');
+        if (!storageService.isConfigured()) {
+          logger.warn('Supabase storage is not configured — cannot generate signed URL for profile picture');
+        } else {
+          photo_url = await storageService.getSignedUrl(employee.photo_url, 3600);
+        }
+      } catch (err) {
+        logger.warn(`Failed to get signed URL for profile picture: ${err.message}`);
+      }
+    }
+
     res.json({
       success: true,
-      data: user
+      data: {
+        email: user.email,
+        role: user.role,
+        last_login: user.last_login_at,
+        employee_name: employee?.full_name || '',
+        employee_id: employee?.employee_id || '',
+        department: employee?.department || '',
+        position: employee?.position || '',
+        photo_url
+      }
     });
   } catch (error) {
     next(error);
@@ -346,6 +372,116 @@ const resetToDefault = async (req, res, next) => {
   }
 };
 
+/**
+ * Upload profile picture
+ */
+const uploadProfilePicture = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const companyId = req.user.company_id;
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No image file provided'
+      });
+    }
+
+    const employee = await Employee.findOne({
+      where: { user_id: userId, company_id: companyId }
+    });
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: 'Employee record not found'
+      });
+    }
+
+    const storageService = require('../services/supabaseStorageService');
+    const { generateFilename } = require('../config/upload.config');
+
+    // Delete old photo if exists
+    if (employee.photo_url) {
+      try {
+        await storageService.deleteFile(employee.photo_url);
+      } catch (err) {
+        logger.warn(`Failed to delete old profile picture: ${err.message}`);
+      }
+    }
+
+    // Upload new photo
+    const filename = generateFilename(req.file.originalname);
+    const storagePath = `profile-pictures/${companyId}/${userId}/${filename}`;
+
+    await storageService.uploadFile(req.file.buffer, storagePath, req.file.mimetype);
+
+    // Update employee record
+    employee.photo_url = storagePath;
+    await employee.save();
+
+    // Return signed URL
+    let signedUrl = null;
+    try {
+      signedUrl = await storageService.getSignedUrl(storagePath, 3600);
+    } catch (err) {
+      logger.warn(`Failed to get signed URL after upload: ${err.message}`);
+    }
+
+    logger.info(`Profile picture uploaded for user: ${userId}`);
+
+    res.json({
+      success: true,
+      message: 'Profile picture uploaded successfully',
+      data: { photo_url: signedUrl }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Remove profile picture
+ */
+const removeProfilePicture = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const companyId = req.user.company_id;
+
+    const employee = await Employee.findOne({
+      where: { user_id: userId, company_id: companyId }
+    });
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: 'Employee record not found'
+      });
+    }
+
+    if (employee.photo_url) {
+      const storageService = require('../services/supabaseStorageService');
+      try {
+        await storageService.deleteFile(employee.photo_url);
+      } catch (err) {
+        logger.warn(`Failed to delete profile picture: ${err.message}`);
+      }
+    }
+
+    employee.photo_url = null;
+    await employee.save();
+
+    logger.info(`Profile picture removed for user: ${userId}`);
+
+    res.json({
+      success: true,
+      message: 'Profile picture removed successfully'
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getSettings,
   updateAppearanceSettings,
@@ -356,5 +492,7 @@ module.exports = {
   enableTwoFactor,
   disableTwoFactor,
   getAccountInfo,
-  resetToDefault
+  resetToDefault,
+  uploadProfilePicture,
+  removeProfilePicture
 };

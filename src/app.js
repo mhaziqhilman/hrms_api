@@ -33,6 +33,8 @@ const publicHolidayRoutes = require('./routes/publicHoliday.routes');
 const statutoryConfigRoutes = require('./routes/statutoryConfig.routes');
 const emailTemplateRoutes = require('./routes/emailTemplate.routes');
 const leaveEntitlementRoutes = require('./routes/leaveEntitlement.routes');
+const announcementCategoryRoutes = require('./routes/announcementCategory.routes');
+const notificationRoutes = require('./routes/notification.routes');
 
 // Initialize express app
 const app = express();
@@ -121,6 +123,8 @@ app.use('/api/public-holidays', publicHolidayRoutes);
 app.use('/api/statutory-config', statutoryConfigRoutes);
 app.use('/api/email-templates', emailTemplateRoutes);
 app.use('/api/leave-entitlements', leaveEntitlementRoutes);
+app.use('/api/announcement-categories', announcementCategoryRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Placeholder routes for other modules (to be implemented)
 // app.use('/api/invoices', invoiceRoutes);

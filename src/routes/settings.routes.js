@@ -3,6 +3,7 @@ const { body } = require('express-validator');
 const settingsController = require('../controllers/settingsController');
 const { verifyToken } = require('../middleware/auth.middleware');
 const { validate } = require('../middleware/validation.middleware');
+const { upload } = require('../config/upload.config');
 
 const router = express.Router();
 
@@ -180,6 +181,20 @@ router.post(
   ],
   settingsController.disableTwoFactor
 );
+
+/**
+ * @route   POST /api/settings/profile-picture
+ * @desc    Upload profile picture
+ * @access  Private
+ */
+router.post('/profile-picture', upload.single('photo'), settingsController.uploadProfilePicture);
+
+/**
+ * @route   DELETE /api/settings/profile-picture
+ * @desc    Remove profile picture
+ * @access  Private
+ */
+router.delete('/profile-picture', settingsController.removeProfilePicture);
 
 /**
  * @route   POST /api/settings/reset
