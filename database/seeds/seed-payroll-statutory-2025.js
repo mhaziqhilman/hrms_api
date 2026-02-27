@@ -108,21 +108,12 @@ async function seedPayrollStatutory() {
     await sequelize.authenticate();
     console.log('Connected to database\n');
 
-    // Collect all employee IDs we'll be seeding
-    const employeeIds = Object.values(EMPLOYEE_MAP);
+    // Truncate all payroll and YTD statutory data
+    console.log('Truncating payroll table...');
+    await sequelize.query('TRUNCATE TABLE payroll RESTART IDENTITY CASCADE', { transaction });
 
-    // Clear existing 2025 data for these employees
-    console.log('Clearing existing 2025 payroll data...');
-    await sequelize.query(
-      `DELETE FROM payroll WHERE year = 2025 AND employee_id IN (${employeeIds.join(',')})`,
-      { transaction }
-    );
-
-    console.log('Clearing existing 2025 YTD statutory data...');
-    await sequelize.query(
-      `DELETE FROM ytd_statutory WHERE year = 2025 AND employee_id IN (${employeeIds.join(',')})`,
-      { transaction }
-    );
+    console.log('Truncating ytd_statutory table...');
+    await sequelize.query('TRUNCATE TABLE ytd_statutory RESTART IDENTITY CASCADE', { transaction });
 
     let totalPayroll = 0;
     let totalYTD = 0;

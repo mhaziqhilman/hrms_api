@@ -39,7 +39,7 @@ const generateEAFormExcel = async (data) => {
     header: 0.1, footer: 0.1
   };
 
-  const { company, employee, year, income, deductions, employer_contributions, serialNo } = data;
+  const { company, employee, year, income, deductions, employer_contributions, serialNo, signatory } = data;
 
   // Helper to safely set cell value
   const setCell = (addr, value) => {
@@ -103,15 +103,15 @@ const generateEAFormExcel = async (data) => {
   // E1: EPF fund name + amount
   setCell('J58', 'KWSP');
   setCell('AJ59', deductions.epf_employee);
-  // E2: SOCSO amount
-  setCell('AJ60', deductions.socso_employee);
+  // E2: PERKESO (SOCSO + EIS employee contributions)
+  setCell('AJ60', deductions.socso_employee + deductions.eis_employee);
 
   // ─── Section F — Tax-exempt ──────────────────────────────────
   // Not tracked — leave as 0/blank
 
   // ─── Footer — Signing ────────────────────────────────────────
-  setCell('X65', company.signatory_name || '');
-  setCell('X67', company.signatory_position || '');
+  setCell('X65', company.signatory_name || (signatory && signatory.name) || '');
+  setCell('X67', company.signatory_position || (signatory && signatory.position) || '');
   setCell('X69', company.name || '');
   if (company.address) {
     setCell('X70', company.address);

@@ -13,6 +13,7 @@ const {
   generateCSV
 } = require('../services/reportGeneratorService');
 const { generateEAFormExcel } = require('../services/eaExcelService');
+const { sendEAFormNotification } = require('../services/emailService');
 const libre = require('libreoffice-convert');
 const { promisify } = require('util');
 const convertAsync = promisify(libre.convert);
@@ -88,9 +89,18 @@ async function buildEAFormData(userId, employeeId, year) {
   const user = await User.findByPk(userId, { attributes: ['company_id'] });
   const company = user && user.company_id ? await Company.findByPk(user.company_id) : {};
 
+  // Get the requesting user's employee record for signatory fallback
+  const requestingEmployee = await Employee.findOne({
+    where: { user_id: userId, company_id: user.company_id }
+  });
+
   return {
     company: company || {},
     employee,
+    signatory: requestingEmployee ? {
+      name: requestingEmployee.full_name || '',
+      position: requestingEmployee.position || ''
+    } : null,
     year: parseInt(year),
     income: {
       salary: roundToTwo(totals.salary),
@@ -297,6 +307,53 @@ exports.downloadEAFormExcel = async (req, res, next) => {
     logger.info(`EA Form Excel downloaded for employee ${employee_id}, year ${year}`);
   } catch (error) {
     logger.error('Error generating EA Form Excel:', error);
+    next(error);
+  }
+};
+
+/**
+ * Send EA Form via email with PDF attachment
+ */
+exports.sendEAFormEmail = async (req, res, next) => {
+  try {
+    const { employee_id, year } = req.params;
+
+    const data = await buildEAFormData(req.user.id, employee_id, year);
+    if (data.error) {
+      return res.status(404).json({ success: false, message: data.error });
+    }
+
+    // Get employee's user email
+    const employee = await Employee.findByPk(employee_id, { attributes: ['user_id', 'full_name'] });
+    if (!employee?.user_id) {
+      return res.status(400).json({ success: false, message: 'Employee does not have a linked user account' });
+    }
+
+    const user = await User.findByPk(employee.user_id, { attributes: ['email'] });
+    if (!user?.email) {
+      return res.status(400).json({ success: false, message: 'Employee email not found' });
+    }
+
+    // Generate PDF
+    const excelBuffer = await generateEAFormExcel(data);
+    const pdfBuffer = await convertAsync(excelBuffer, '.pdf', undefined);
+
+    await sendEAFormNotification(
+      user.email,
+      employee.full_name,
+      year,
+      pdfBuffer,
+      req.user.company_id
+    );
+
+    logger.info(`EA Form email sent for employee ${employee_id}, year ${year} to ${user.email}`);
+
+    res.status(200).json({
+      success: true,
+      message: `EA Form sent to ${user.email}`
+    });
+  } catch (error) {
+    logger.error('Error sending EA Form email:', error);
     next(error);
   }
 };

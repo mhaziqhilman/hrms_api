@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const { Op } = require('sequelize');
 const { Invitation, User, Company, UserCompany, Employee } = require('../models');
-const { sendInvitationEmail } = require('./emailService');
+const { sendInvitationEmail, sendWelcomeEmail } = require('./emailService');
 const logger = require('../utils/logger');
 
 /**
@@ -157,6 +157,25 @@ const acceptInvitation = async (token, userId) => {
   });
 
   logger.info(`Invitation accepted by user ${userId} for company ${invitation.company_id}`);
+
+  // Send welcome email (non-blocking)
+  try {
+    const welcomeUser = await User.findByPk(userId, { attributes: ['name', 'email'] });
+    if (welcomeUser?.email) {
+      const linkedEmployee = await Employee.findOne({
+        where: { user_id: userId, company_id: invitation.company_id },
+        attributes: ['employee_id']
+      });
+      sendWelcomeEmail(
+        welcomeUser.email,
+        welcomeUser.name || invitation.email,
+        linkedEmployee?.employee_id || null,
+        null
+      ).catch(err => logger.error(`Failed to send welcome email to ${welcomeUser.email}:`, err));
+    }
+  } catch (emailErr) {
+    logger.error(`Error sending welcome email for user ${userId}:`, emailErr);
+  }
 
   // Return updated user
   const user = await User.findByPk(userId, {

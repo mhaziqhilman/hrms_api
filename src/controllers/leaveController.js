@@ -1,5 +1,6 @@
 const { Leave, Employee, LeaveType, LeaveEntitlement, User } = require('../models');
 const notificationService = require('../services/notificationService');
+const { sendLeaveStatusNotification, shouldSendEmail } = require('../services/emailService');
 const logger = require('../utils/logger');
 const { Op } = require('sequelize');
 const { sequelize } = require('../config/database');
@@ -593,6 +594,26 @@ exports.approveRejectLeave = async (req, res, next) => {
         notifMessage,
         { leave_id: leave.id, link: '/leave' }
       );
+
+      // Send email notification (non-blocking)
+      try {
+        const canSend = await shouldSendEmail(leave.employee.user_id, 'leave_status');
+        if (canSend) {
+          const leaveUser = await User.findByPk(leave.employee.user_id, { attributes: ['email'] });
+          if (leaveUser?.email) {
+            sendLeaveStatusNotification(
+              leaveUser.email,
+              leave.employee.full_name,
+              leave.leave_type?.name || 'Leave',
+              action === 'approve' ? 'Approved' : 'Rejected',
+              rejection_reason || null,
+              req.user.company_id
+            ).catch(err => logger.error(`Failed to send leave status email:`, err));
+          }
+        }
+      } catch (emailErr) {
+        logger.error(`Error sending leave status email:`, emailErr);
+      }
     }
 
     // Fetch updated leave

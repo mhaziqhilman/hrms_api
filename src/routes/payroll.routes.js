@@ -136,6 +136,20 @@ router.post('/bulk-cancel', verifyToken, requireAdmin, bulkIdsValidation, valida
 router.post('/bulk-delete', verifyToken, requireAdmin, bulkIdsValidation, validate, payrollController.bulkPermanentDeletePayroll);
 
 /**
+ * @route   POST /api/payroll/:id/payslip/send-email
+ * @desc    Send payslip via email with PDF attachment
+ * @access  Private (Admin)
+ */
+router.post(
+  '/:id/payslip/send-email',
+  verifyToken,
+  requireAdmin,
+  idParamValidation,
+  validate,
+  payrollController.sendPayslipEmail
+);
+
+/**
  * @route   GET /api/payroll/:id
  * @desc    Get single payroll record by ID
  * @access  Private (Admin, Manager, Staff - own records only)

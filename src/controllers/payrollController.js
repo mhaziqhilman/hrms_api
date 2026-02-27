@@ -1,10 +1,20 @@
 const Payroll = require('../models/Payroll');
 const Employee = require('../models/Employee');
+const User = require('../models/User');
+const Company = require('../models/Company');
 const YTDStatutory = require('../models/YTDStatutory');
 const { Op } = require('sequelize');
 const { sequelize } = require('../config/database');
 const logger = require('../utils/logger');
 const { calculateAllStatutory } = require('../utils/statutoryCalculations');
+const { sendPayslipNotification, shouldSendEmail } = require('../services/emailService');
+const { generatePayslipPDF } = require('../services/payslipPdfService');
+const storageService = require('../services/supabaseStorageService');
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
 
 /**
  * Get all payroll records with pagination and filtering
@@ -511,7 +521,7 @@ exports.markAsPaid = async (req, res, next) => {
 
     const payroll = await Payroll.findOne({
       where: { id },
-      include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
+      include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: ['id', 'full_name', 'user_id'] }]
     });
 
     if (!payroll) {
@@ -531,6 +541,29 @@ exports.markAsPaid = async (req, res, next) => {
     await payroll.update({ status: 'Paid' });
 
     logger.info(`Payroll ${id} marked as paid by user ${req.user.id}`);
+
+    // Send payslip notification email
+    if (payroll.employee?.user_id) {
+      try {
+        const canSend = await shouldSendEmail(payroll.employee.user_id, 'payslip');
+        if (canSend) {
+          const user = await User.findByPk(payroll.employee.user_id, { attributes: ['email'] });
+          if (user?.email) {
+            const monthName = MONTH_NAMES[payroll.month - 1];
+            sendPayslipNotification(
+              user.email,
+              payroll.employee.full_name,
+              monthName,
+              payroll.year,
+              `${process.env.FRONTEND_URL}/payroll`,
+              req.user.company_id
+            ).catch(err => logger.error(`Failed to send payslip email for payroll ${id}:`, err));
+          }
+        }
+      } catch (emailErr) {
+        logger.error(`Error sending payslip notification for payroll ${id}:`, emailErr);
+      }
+    }
 
     res.status(200).json({
       success: true,
@@ -661,9 +694,47 @@ exports.generatePayslip = async (req, res, next) => {
       });
     }
 
+    // Fetch company info
+    const company = await Company.findByPk(req.user.company_id, {
+      attributes: ['name', 'registration_no', 'logo_url']
+    });
+
+    // Resolve logo to signed URL
+    let logoUrl = company?.logo_url || null;
+    if (logoUrl && !logoUrl.startsWith('http') && storageService.isConfigured()) {
+      try {
+        logoUrl = await storageService.getSignedUrl(logoUrl, 3600);
+      } catch (err) {
+        logger.error('Failed to generate logo signed URL for payslip:', err.message);
+        logoUrl = null;
+      }
+    }
+
+    // Fetch YTD statutory data
+    const ytdRecord = await YTDStatutory.findOne({
+      where: {
+        employee_id: payroll.employee_id,
+        year: payroll.year,
+        month: payroll.month
+      }
+    });
+
+    // Fetch issuer info
+    const issuer = payroll.processed_by
+      ? await User.findByPk(payroll.processed_by, {
+          attributes: ['id', 'email'],
+          include: [{ model: Employee, as: 'employee', attributes: ['full_name'] }]
+        })
+      : null;
+
     // Format payslip data
     const payslip = {
       payroll_id: payroll.id,
+      company: {
+        name: company?.name || 'Company',
+        registration_no: company?.registration_no || '',
+        logo_url: logoUrl
+      },
       employee: {
         id: payroll.employee.id,
         employee_id: payroll.employee.employee_id,
@@ -709,8 +780,18 @@ exports.generatePayslip = async (req, res, next) => {
         bank_name: payroll.employee.bank_name,
         account_no: payroll.employee.bank_account_no
       },
+      ytd: ytdRecord ? {
+        epf_employee: parseFloat(ytdRecord.ytd_employee_epf),
+        epf_employer: parseFloat(ytdRecord.ytd_employer_epf),
+        socso_employee: parseFloat(ytdRecord.ytd_employee_socso),
+        socso_employer: parseFloat(ytdRecord.ytd_employer_socso),
+        eis_employee: parseFloat(ytdRecord.ytd_employee_eis),
+        eis_employer: parseFloat(ytdRecord.ytd_employer_eis),
+        pcb: parseFloat(ytdRecord.ytd_pcb)
+      } : null,
       status: payroll.status,
       notes: payroll.notes,
+      issued_by: issuer?.employee?.full_name || issuer?.email || null,
       generated_at: new Date().toISOString()
     };
 
@@ -725,6 +806,139 @@ exports.generatePayslip = async (req, res, next) => {
     });
   } catch (error) {
     logger.error(`Error generating payslip for payroll ${req.params.id}:`, error);
+    next(error);
+  }
+};
+
+/**
+ * Send payslip via email with PDF attachment
+ */
+exports.sendPayslipEmail = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    const payroll = await Payroll.findByPk(id, {
+      include: [
+        {
+          model: Employee,
+          as: 'employee',
+          attributes: [
+            'id', 'employee_id', 'full_name', 'ic_no', 'user_id',
+            'position', 'department', 'bank_name',
+            'bank_account_no', 'epf_no', 'socso_no', 'tax_no'
+          ],
+          where: { company_id: req.user.company_id },
+          required: true
+        }
+      ]
+    });
+
+    if (!payroll) {
+      return res.status(404).json({ success: false, message: 'Payroll record not found' });
+    }
+
+    if (!payroll.employee.user_id) {
+      return res.status(400).json({ success: false, message: 'Employee does not have a linked user account' });
+    }
+
+    const user = await User.findByPk(payroll.employee.user_id, { attributes: ['id', 'email'] });
+    if (!user || !user.email) {
+      return res.status(400).json({ success: false, message: 'Employee email not found' });
+    }
+
+    const company = await Company.findByPk(req.user.company_id, { attributes: ['name', 'registration_no', 'logo_url'] });
+
+    // Fetch YTD data
+    const ytdRecord = await YTDStatutory.findOne({
+      where: { employee_id: payroll.employee_id, year: payroll.year, month: payroll.month }
+    });
+
+    // Fetch issuer info
+    const issuer = payroll.processed_by
+      ? await User.findByPk(payroll.processed_by, {
+          attributes: ['id', 'email'],
+          include: [{ model: Employee, as: 'employee', attributes: ['full_name'] }]
+        })
+      : null;
+
+    // Build payslip data (same format as generatePayslip)
+    const payslipData = {
+      employee: {
+        id: payroll.employee.id,
+        employee_id: payroll.employee.employee_id,
+        full_name: payroll.employee.full_name,
+        ic_no: payroll.employee.ic_no,
+        position: payroll.employee.position,
+        department: payroll.employee.department
+      },
+      pay_period: {
+        month: payroll.month,
+        year: payroll.year,
+        start_date: payroll.pay_period_start,
+        end_date: payroll.pay_period_end,
+        payment_date: payroll.payment_date
+      },
+      earnings: {
+        basic_salary: parseFloat(payroll.basic_salary),
+        allowances: parseFloat(payroll.allowances),
+        overtime_pay: parseFloat(payroll.overtime_pay),
+        bonus: parseFloat(payroll.bonus),
+        commission: parseFloat(payroll.commission),
+        gross_salary: parseFloat(payroll.gross_salary)
+      },
+      deductions: {
+        epf_employee: parseFloat(payroll.epf_employee),
+        socso_employee: parseFloat(payroll.socso_employee),
+        eis_employee: parseFloat(payroll.eis_employee),
+        pcb_deduction: parseFloat(payroll.pcb_deduction),
+        unpaid_leave_deduction: parseFloat(payroll.unpaid_leave_deduction),
+        other_deductions: parseFloat(payroll.other_deductions),
+        total_deductions: parseFloat(payroll.total_deductions)
+      },
+      employer_contributions: {
+        epf_employer: parseFloat(payroll.epf_employer),
+        socso_employer: parseFloat(payroll.socso_employer),
+        eis_employer: parseFloat(payroll.eis_employer)
+      },
+      net_salary: parseFloat(payroll.net_salary),
+      bank_details: {
+        bank_name: payroll.employee.bank_name,
+        account_no: payroll.employee.bank_account_no
+      },
+      ytd: ytdRecord ? {
+        epf_employee: parseFloat(ytdRecord.ytd_employee_epf),
+        epf_employer: parseFloat(ytdRecord.ytd_employer_epf),
+        socso_employee: parseFloat(ytdRecord.ytd_employee_socso),
+        socso_employer: parseFloat(ytdRecord.ytd_employer_socso),
+        eis_employee: parseFloat(ytdRecord.ytd_employee_eis),
+        eis_employer: parseFloat(ytdRecord.ytd_employer_eis),
+        pcb: parseFloat(ytdRecord.ytd_pcb)
+      } : null,
+      issued_by: issuer?.employee?.full_name || issuer?.email || null,
+      generated_at: new Date().toISOString()
+    };
+
+    const pdfBuffer = await generatePayslipPDF(payslipData, company?.name || 'Company', company?.registration_no || '');
+    const monthName = MONTH_NAMES[payroll.month - 1];
+
+    await sendPayslipNotification(
+      user.email,
+      payroll.employee.full_name,
+      monthName,
+      payroll.year,
+      `${process.env.FRONTEND_URL}/payroll/${id}/payslip`,
+      req.user.company_id,
+      pdfBuffer
+    );
+
+    logger.info(`Payslip email sent for payroll ${id} to ${user.email}`);
+
+    res.status(200).json({
+      success: true,
+      message: `Payslip sent to ${user.email}`
+    });
+  } catch (error) {
+    logger.error(`Error sending payslip email for payroll ${req.params.id}:`, error);
     next(error);
   }
 };
@@ -1036,7 +1250,7 @@ exports.bulkMarkAsPaid = async (req, res, next) => {
         model: Employee,
         as: 'employee',
         where: { company_id: req.user.company_id },
-        attributes: ['id', 'full_name'],
+        attributes: ['id', 'full_name', 'user_id'],
         required: true
       }]
     });
@@ -1058,6 +1272,29 @@ exports.bulkMarkAsPaid = async (req, res, next) => {
         }
         await payroll.update({ status: 'Paid' });
         results.push({ id: payroll.id, success: true, message: 'Marked as paid' });
+
+        // Send payslip notification email
+        if (payroll.employee?.user_id) {
+          try {
+            const canSend = await shouldSendEmail(payroll.employee.user_id, 'payslip');
+            if (canSend) {
+              const user = await User.findByPk(payroll.employee.user_id, { attributes: ['email'] });
+              if (user?.email) {
+                const monthName = MONTH_NAMES[payroll.month - 1];
+                sendPayslipNotification(
+                  user.email,
+                  payroll.employee.full_name,
+                  monthName,
+                  payroll.year,
+                  `${process.env.FRONTEND_URL}/payroll`,
+                  req.user.company_id
+                ).catch(err => logger.error(`Failed to send payslip email for payroll ${payroll.id}:`, err));
+              }
+            }
+          } catch (emailErr) {
+            logger.error(`Error sending payslip notification for payroll ${payroll.id}:`, emailErr);
+          }
+        }
       } catch (error) {
         results.push({ id: payroll.id, success: false, message: error.message });
       }

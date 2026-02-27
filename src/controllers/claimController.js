@@ -4,6 +4,8 @@ const Employee = require('../models/Employee');
 const User = require('../models/User');
 const { Op } = require('sequelize');
 const notificationService = require('../services/notificationService');
+const { sendClaimStatusNotification, shouldSendEmail } = require('../services/emailService');
+const logger = require('../utils/logger');
 
 // Submit a new claim
 exports.submitClaim = async (req, res) => {
@@ -383,6 +385,28 @@ exports.managerApproval = async (req, res) => {
         notifMessage,
         { claim_id: claim.id, link: '/claims' }
       );
+
+      // Send email notification (non-blocking)
+      try {
+        const canSend = await shouldSendEmail(claimEmployee.user_id, 'claim_status');
+        if (canSend) {
+          const claimUser = await User.findByPk(claimEmployee.user_id, { attributes: ['email'] });
+          const claimEmpDetail = await Employee.findByPk(claim.employee_id, { attributes: ['full_name'] });
+          if (claimUser?.email) {
+            const status = action === 'approve' ? 'Approved by Manager' : 'Rejected';
+            sendClaimStatusNotification(
+              claimUser.email,
+              claimEmpDetail?.full_name || 'Employee',
+              claim.amount,
+              status,
+              rejection_reason || null,
+              req.user.company_id
+            ).catch(err => logger.error(`Failed to send claim status email:`, err));
+          }
+        }
+      } catch (emailErr) {
+        logger.error(`Error sending claim status email:`, emailErr);
+      }
     }
 
     // Fetch updated claim with associations
@@ -518,6 +542,28 @@ exports.financeApproval = async (req, res) => {
         notifMessage,
         { claim_id: claim.id, link: '/claims' }
       );
+
+      // Send email notification (non-blocking)
+      try {
+        const canSend = await shouldSendEmail(finClaimEmployee.user_id, 'claim_status');
+        if (canSend) {
+          const finClaimUser = await User.findByPk(finClaimEmployee.user_id, { attributes: ['email'] });
+          const finClaimEmpDetail = await Employee.findByPk(claim.employee_id, { attributes: ['full_name'] });
+          if (finClaimUser?.email) {
+            const statusMap = { approve: 'Approved by Finance', reject: 'Rejected by Finance', paid: 'Paid' };
+            sendClaimStatusNotification(
+              finClaimUser.email,
+              finClaimEmpDetail?.full_name || 'Employee',
+              claim.amount,
+              statusMap[action],
+              rejection_reason || (action === 'paid' && payment_reference ? `Payment Ref: ${payment_reference}` : null),
+              req.user.company_id
+            ).catch(err => logger.error(`Failed to send claim finance email:`, err));
+          }
+        }
+      } catch (emailErr) {
+        logger.error(`Error sending claim finance email:`, emailErr);
+      }
     }
 
     // Fetch updated claim with associations

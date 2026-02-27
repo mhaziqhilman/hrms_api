@@ -124,7 +124,7 @@ const updateCompany = async (companyId, updateData) => {
 
   const allowedFields = [
     'name', 'registration_no', 'description', 'industry',
-    'size', 'country', 'address', 'phone', 'website', 'logo_url',
+    'size', 'country', 'address', 'phone', 'website',
     'e_file_no', 'employer_epf_no', 'employer_socso_code',
     'signatory_name', 'signatory_position', 'lhdn_branch'
   ];

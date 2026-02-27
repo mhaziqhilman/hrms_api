@@ -3,6 +3,40 @@ const emailConfig = require('../config/email');
 const logger = require('../utils/logger');
 
 /**
+ * Check user notification preferences before sending automatic emails
+ * @param {Number} userId - User ID
+ * @param {String} notificationType - One of: leave_status, claim_status, payslip, memo, policy
+ * @returns {Boolean} true if email should be sent
+ */
+const shouldSendEmail = async (userId, notificationType) => {
+  try {
+    const { UserSettings } = require('../models');
+    const settings = await UserSettings.findOne({ where: { user_id: userId } });
+    if (!settings) return true; // Default to sending if no settings found
+
+    // Master toggle
+    if (!settings.email_notifications) return false;
+
+    // Per-type preferences
+    const typeMap = {
+      leave_status: 'notify_leave_approval',
+      claim_status: 'notify_claim_approval',
+      payslip: 'notify_payslip_ready',
+      memo: 'notify_memo_received',
+      policy: 'notify_policy_update'
+    };
+
+    const field = typeMap[notificationType];
+    if (field && settings[field] === false) return false;
+
+    return true;
+  } catch (error) {
+    logger.error(`Error checking email preferences for user ${userId}: ${error.message}`);
+    return true; // Default to sending on error
+  }
+};
+
+/**
  * Get email template from DB with fallback to hardcoded defaults
  */
 const getTemplate = async (companyId, templateKey) => {
@@ -123,14 +157,17 @@ const sendPasswordResetEmail = async (email, resetToken, userName, companyId) =>
 /**
  * Send payslip notification email
  */
-const sendPayslipNotification = async (email, employeeName, month, year, payslipUrl, companyId) => {
+const sendPayslipNotification = async (email, employeeName, month, year, payslipUrl, companyId, pdfBuffer = null) => {
+  const attachments = pdfBuffer ? [{ filename: `Payslip_${month}_${year}.pdf`, content: pdfBuffer, contentType: 'application/pdf' }] : [];
+
   const dbTemplate = await getTemplate(companyId, 'payslip');
   if (dbTemplate) {
     const vars = { employee_name: employeeName, month, year, portal_link: `${process.env.FRONTEND_URL}/payslip`, company_name: 'HRMS' };
     return await sendEmail({
       to: email,
       subject: replaceVariables(dbTemplate.subject, vars),
-      html: textToHtml(replaceVariables(dbTemplate.body, vars))
+      html: textToHtml(replaceVariables(dbTemplate.body, vars)),
+      attachments
     });
   }
 
@@ -147,7 +184,8 @@ const sendPayslipNotification = async (email, employeeName, month, year, payslip
   return await sendEmail({
     to: email,
     subject: `Payslip for ${month} ${year}`,
-    html
+    html,
+    attachments
   });
 };
 
@@ -190,25 +228,33 @@ const sendLeaveStatusNotification = async (email, employeeName, leaveType, statu
 const sendWelcomeEmail = async (email, employeeName, employeeId, tempPassword) => {
   const loginUrl = `${process.env.FRONTEND_URL}/auth/login`;
 
+  const credentialsSection = tempPassword
+    ? `<p><strong>Your login credentials:</strong></p>
+       <ul>
+         <li>Employee ID: ${employeeId || 'N/A'}</li>
+         <li>Email: ${email}</li>
+         <li>Temporary Password: ${tempPassword}</li>
+       </ul>
+       <p><strong>Important:</strong> Please change your password after your first login.</p>`
+    : `<p>You can now access the HRMS portal using your existing account credentials.</p>`;
+
   const html = `
-    <h2>Welcome to the Team!</h2>
-    <p>Dear ${employeeName},</p>
-    <p>Welcome to our organization! Your HRMS account has been created.</p>
-    <p><strong>Your login credentials:</strong></p>
-    <ul>
-      <li>Employee ID: ${employeeId}</li>
-      <li>Email: ${email}</li>
-      <li>Temporary Password: ${tempPassword}</li>
-    </ul>
-    <p><strong>Important:</strong> Please change your password after your first login.</p>
-    <p><a href="${loginUrl}" style="background-color: #0066cc; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Login to HRMS</a></p>
-    <br>
-    <p>Best regards,<br>HR Department</p>
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #10b981;">Welcome to the Team!</h2>
+      <p>Dear ${employeeName},</p>
+      <p>Welcome to our organization! You have successfully joined on Nextura HRMS.</p>
+      ${credentialsSection}
+      <p style="text-align: center; margin: 30px 0;">
+        <a href="${loginUrl}" style="background-color: #10b981; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold;">Login to HRMS</a>
+      </p>
+      <br>
+      <p>Best regards,<br>Nextura HRMS Team</p>
+    </div>
   `;
 
   return await sendEmail({
     to: email,
-    subject: 'Welcome to HRMS - Your Account Details',
+    subject: 'Welcome to Nextura HRMS',
     html
   });
 };
@@ -273,14 +319,89 @@ const sendInvitationEmail = async (email, inviterName, companyName, invitationTo
   });
 };
 
+/**
+ * Send claim status notification email
+ */
+const sendClaimStatusNotification = async (email, employeeName, claimAmount, status, remarks, companyId) => {
+  const dbTemplate = await getTemplate(companyId, 'claim_status');
+  if (dbTemplate) {
+    const vars = { employee_name: employeeName, claim_amount: `RM${claimAmount}`, status, remarks: remarks || '', company_name: 'HRMS' };
+    return await sendEmail({
+      to: email,
+      subject: replaceVariables(dbTemplate.subject, vars),
+      html: textToHtml(replaceVariables(dbTemplate.body, vars))
+    });
+  }
+
+  const statusColor = status.includes('Rejected') ? '#dc3545' : '#28a745';
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2>Claim ${status}</h2>
+      <p>Dear ${employeeName},</p>
+      <p>Your claim of <strong>RM${claimAmount}</strong> has been <span style="color: ${statusColor}; font-weight: bold;">${status}</span>.</p>
+      ${remarks ? `<p><strong>Remarks:</strong> ${remarks}</p>` : ''}
+      <p>You can view details in the HRMS portal.</p>
+      <br>
+      <p>Best regards,<br>HR Department</p>
+    </div>
+  `;
+
+  return await sendEmail({
+    to: email,
+    subject: `Claim ${status}`,
+    html
+  });
+};
+
+/**
+ * Send EA Form notification email with PDF attachment
+ */
+const sendEAFormNotification = async (email, employeeName, year, pdfBuffer, companyId) => {
+  const attachments = [{ filename: `EA_Form_${year}.pdf`, content: pdfBuffer, contentType: 'application/pdf' }];
+
+  const dbTemplate = await getTemplate(companyId, 'ea_form');
+  if (dbTemplate) {
+    const vars = { employee_name: employeeName, year: String(year), company_name: 'HRMS' };
+    return await sendEmail({
+      to: email,
+      subject: replaceVariables(dbTemplate.subject, vars),
+      html: textToHtml(replaceVariables(dbTemplate.body, vars)),
+      attachments
+    });
+  }
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #10b981;">EA Form ${year}</h2>
+      <p>Dear ${employeeName},</p>
+      <p>Please find attached your EA Form (Borang EA) for the year <strong>${year}</strong>.</p>
+      <p>This document is your Statement of Remuneration from Employment for tax filing purposes.</p>
+      <p>If you have any questions, please contact your HR department.</p>
+      <br>
+      <p>Best regards,<br>Nextura HRMS Team</p>
+    </div>
+  `;
+
+  return await sendEmail({
+    to: email,
+    subject: `EA Form ${year} - Statement of Remuneration`,
+    html,
+    attachments
+  });
+};
+
 module.exports = {
   sendEmail,
   sendPasswordResetEmail,
   sendPayslipNotification,
   sendLeaveStatusNotification,
+  sendClaimStatusNotification,
+  sendEAFormNotification,
   sendWelcomeEmail,
   sendVerificationEmail,
   sendInvitationEmail,
+  shouldSendEmail,
   getTemplate,
   replaceVariables,
   textToHtml

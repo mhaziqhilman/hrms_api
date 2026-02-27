@@ -32,6 +32,16 @@ const DEFAULT_TEMPLATES = {
     subject: "You've been invited to join {{company_name}}",
     body: 'Hello,\n\n{{inviter_name}} has invited you to join {{company_name}} on HRMS.\n\nClick the link below to accept the invitation and get started:\n\n{{invite_link}}\n\nThis invitation will expire in 7 days.\n\nBest regards,\n{{company_name}} HRMS Team',
     variables: ['inviter_name', 'company_name', 'invite_link']
+  },
+  claim_status: {
+    subject: 'Claim {{status}}',
+    body: 'Dear {{employee_name}},\n\nYour claim of {{claim_amount}} has been {{status}}.\n\n{{remarks}}\n\nYou can view details in the HRMS portal.\n\nBest regards,\n{{company_name}} HR Department',
+    variables: ['employee_name', 'claim_amount', 'status', 'remarks', 'company_name']
+  },
+  ea_form: {
+    subject: 'EA Form {{year}} - Statement of Remuneration',
+    body: 'Dear {{employee_name}},\n\nPlease find attached your EA Form (Borang EA) for the year {{year}}.\n\nThis document is your Statement of Remuneration from Employment for tax filing purposes.\n\nIf you have any questions, please contact your HR department.\n\nBest regards,\n{{company_name}} HR Department',
+    variables: ['employee_name', 'year', 'company_name']
   }
 };
 
@@ -163,7 +173,8 @@ exports.previewTemplate = async (req, res) => {
       employee_id: 'EMP001',
       email: 'john@example.com',
       temp_password: 'Temp@1234',
-      inviter_name: 'Jane Smith'
+      inviter_name: 'Jane Smith',
+      claim_amount: 'RM500.00'
     };
 
     let previewSubject = template.subject;

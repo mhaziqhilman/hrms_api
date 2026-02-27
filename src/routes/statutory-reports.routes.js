@@ -50,6 +50,13 @@ router.get('/ea/:employee_id/:year/pdf', adminAccess, statutoryReportsController
 router.get('/ea/:employee_id/:year/excel', adminAccess, statutoryReportsController.downloadEAFormExcel);
 
 /**
+ * @route   POST /api/statutory-reports/ea/:employee_id/:year/send-email
+ * @desc    Send EA Form via email with PDF attachment
+ * @access  Admin, Super Admin
+ */
+router.post('/ea/:employee_id/:year/send-email', adminAccess, statutoryReportsController.sendEAFormEmail);
+
+/**
  * EPF Borang A Routes (Monthly)
  */
 
