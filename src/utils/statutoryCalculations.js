@@ -242,19 +242,15 @@ const getTaxBracket = (chargeableIncome) => {
 };
 
 /**
- * Get B value (cumulative tax on M after rebates)
- * For P <= RM35,000: B = cumTax - rebate (min 0)
- * For P > RM35,000: B = cumTax (no rebate)
+ * Get tax rebate amount based on category
+ * Rebate only applies when P <= RM35,000
  */
-const getBValue = (chargeableIncome, taxCategory, cumTax) => {
-  if (chargeableIncome <= 35000) {
-    let rebate = TAX_REBATE_INDIVIDUAL;
-    if (taxCategory === 'KB') {
-      rebate += TAX_REBATE_SPOUSE;
-    }
-    return Math.max(cumTax - rebate, 0);
+const getRebate = (taxCategory) => {
+  let rebate = TAX_REBATE_INDIVIDUAL; // RM400
+  if (taxCategory === 'KB') {
+    rebate += TAX_REBATE_SPOUSE; // +RM400
   }
-  return cumTax;
+  return rebate;
 };
 
 // ============================================================================
@@ -267,7 +263,8 @@ const getCompanyRates = async (companyId) => {
     epf_employer_rate_above_5000: 0.12,
     epf_employer_threshold: 5000,
     socso_max_salary: 6000,
-    eis_max_salary: 6000
+    eis_max_salary: 6000,
+    pcb_minimum_threshold: false
   };
 
   if (!companyId) return defaults;
@@ -277,7 +274,9 @@ const getCompanyRates = async (companyId) => {
     const configs = await StatutoryConfig.findAll({ where: { company_id: companyId } });
     const rates = { ...defaults };
     for (const config of configs) {
-      if (rates[config.config_key] !== undefined) {
+      if (config.config_key === 'pcb_minimum_threshold') {
+        rates.pcb_minimum_threshold = config.config_value === 'true';
+      } else if (rates[config.config_key] !== undefined) {
         rates[config.config_key] = parseFloat(config.config_value);
       }
     }
@@ -306,8 +305,8 @@ const calculateEPF = (monthlySalary, rateOverrides) => {
     : (rateOverrides?.epf_employer_rate_above_5000 ?? 0.12);
 
   return {
-    employee: roundTo2(monthlySalary * employeeRate),
-    employer: roundTo2(monthlySalary * employerRate)
+    employee: Math.ceil(monthlySalary * employeeRate),
+    employer: Math.ceil(monthlySalary * employerRate)
   };
 };
 
@@ -361,6 +360,7 @@ const calculateEIS = (monthlySalary) => {
  * @param {number} params.additionalRemuneration - Yt: Bonus, arrears, etc. (optional)
  * @param {number} params.additionalRemunerationEpf - Kt: EPF on additional remuneration (optional)
  * @param {boolean} params.isResident - Whether employee is a tax resident (default: true)
+ * @param {boolean} params.pcbMinimumThreshold - If true, zero out PCB when < RM10 (default: false)
  * @returns {number} Monthly PCB amount
  */
 const calculatePCB = (params) => {
@@ -380,7 +380,8 @@ const calculatePCB = (params) => {
     currentMonthEpf = 0,
     additionalRemuneration = 0,
     additionalRemunerationEpf = 0,
-    isResident = true
+    isResident = true,
+    pcbMinimumThreshold = false
   } = params;
 
   if (monthlySalary <= 0) return 0;
@@ -444,12 +445,14 @@ const calculatePCB = (params) => {
   // Step 6: Look up tax bracket
   const bracket = getTaxBracket(P);
 
-  // Step 7: Get B value (cumulative tax on M after rebates)
-  const B = getBValue(P, taxCategory, bracket.cumTax);
-
-  // Step 8: Calculate annual tax on normal remuneration
-  let T_normal = ((P - bracket.m) * bracket.rate / 100) + B;
+  // Step 7-8: Calculate annual tax on normal remuneration
+  let T_normal = ((P - bracket.m) * bracket.rate / 100) + bracket.cumTax;
   T_normal = Math.max(T_normal, 0);
+
+  // Apply rebate to total tax if P <= RM35,000
+  if (P <= 35000) {
+    T_normal = Math.max(T_normal - getRebate(taxCategory), 0);
+  }
 
   // Step 9: Calculate monthly PCB
   // PCB = (T - Z - X) / (n + 1)
@@ -470,9 +473,14 @@ const calculatePCB = (params) => {
 
     if (P_withAdditional > 0) {
       const bracketAdditional = getTaxBracket(P_withAdditional);
-      const B_additional = getBValue(P_withAdditional, taxCategory, bracketAdditional.cumTax);
-      let T_withAdditional = ((P_withAdditional - bracketAdditional.m) * bracketAdditional.rate / 100) + B_additional;
+      let T_withAdditional = ((P_withAdditional - bracketAdditional.m) * bracketAdditional.rate / 100) + bracketAdditional.cumTax;
       T_withAdditional = Math.max(T_withAdditional, 0);
+
+      // Apply rebate to total tax if P_withAdditional <= RM35,000
+      if (P_withAdditional <= 35000) {
+        T_withAdditional = Math.max(T_withAdditional - getRebate(taxCategory), 0);
+      }
+
       pcbAdditional = Math.max(T_withAdditional - T_normal, 0);
     }
   }
@@ -480,8 +488,8 @@ const calculatePCB = (params) => {
   // Step 11: Total PCB
   let totalPCB = pcbNormal + pcbAdditional;
 
-  // Step 12: Apply minimum threshold (< RM10 = 0)
-  if (totalPCB < 10) {
+  // Step 12: Apply minimum threshold if enabled (< RM10 = 0)
+  if (pcbMinimumThreshold && totalPCB < 10) {
     totalPCB = 0;
   }
 
@@ -540,7 +548,7 @@ const calculateAllStatutory = (monthlySalary, options = {}) => {
   if (hasPCB) {
     const currentMonthEpf = epf.employee;
     const additionalRemunerationEpf = hasEPF && additionalRemuneration > 0
-      ? roundTo2(additionalRemuneration * (rateOverrides?.epf_employee_rate ?? 0.11))
+      ? Math.ceil(additionalRemuneration * (rateOverrides?.epf_employee_rate ?? 0.11))
       : 0;
 
     pcb = calculatePCB({
@@ -559,7 +567,8 @@ const calculateAllStatutory = (monthlySalary, options = {}) => {
       currentMonthEpf,
       additionalRemuneration,
       additionalRemunerationEpf,
-      isResident: true
+      isResident: true,
+      pcbMinimumThreshold: rateOverrides?.pcb_minimum_threshold || false
     });
   }
 

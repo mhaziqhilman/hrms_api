@@ -82,6 +82,11 @@ const Company = sequelize.define('Company', {
     allowNull: true,
     field: 'lhdn_branch'
   },
+  employer_phone: {
+    type: DataTypes.STRING(20),
+    allowNull: true,
+    field: 'employer_phone'
+  },
   owner_id: {
     type: DataTypes.INTEGER,
     allowNull: false,

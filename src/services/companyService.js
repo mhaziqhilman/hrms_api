@@ -126,7 +126,8 @@ const updateCompany = async (companyId, updateData) => {
     'name', 'registration_no', 'description', 'industry',
     'size', 'country', 'address', 'phone', 'website',
     'e_file_no', 'employer_epf_no', 'employer_socso_code',
-    'signatory_name', 'signatory_position', 'lhdn_branch'
+    'signatory_name', 'signatory_position', 'lhdn_branch',
+    'employer_phone'
   ];
 
   const filteredData = {};
@@ -145,7 +146,7 @@ const updateCompany = async (companyId, updateData) => {
  */
 const getUserCompanies = async (userId) => {
   return await UserCompany.findAll({
-    where: { user_id: userId },
+    where: { user_id: userId, status: 'active' },
     include: [{
       model: Company,
       as: 'company',
@@ -184,7 +185,7 @@ const switchCompany = async (userId, companyId) => {
     if (!companyExists) throw new Error('Company not found');
   } else {
     const membership = await UserCompany.findOne({
-      where: { user_id: userId, company_id: companyId }
+      where: { user_id: userId, company_id: companyId, status: 'active' }
     });
     if (!membership) throw new Error('You are not a member of this company');
     membershipRole = membership.role;

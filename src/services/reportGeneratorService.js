@@ -339,6 +339,114 @@ const generateSOCSOForm8APDF = async (data) => {
 };
 
 /**
+ * Generate EIS Lampiran 1 PDF
+ * @param {Object} data - EIS Lampiran 1 data
+ * @returns {Promise<Buffer>} PDF buffer
+ */
+const generateEISLampiran1PDF = async (data) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: 'A4', margin: 40, layout: 'landscape' });
+      const buffers = [];
+
+      doc.on('data', buffers.push.bind(buffers));
+      doc.on('end', () => resolve(Buffer.concat(buffers)));
+      doc.on('error', reject);
+
+      // Header
+      doc.fontSize(14).font('Helvetica-Bold')
+        .text('LAMPIRAN 1', { align: 'center' });
+      doc.fontSize(10).font('Helvetica')
+        .text('PENYATA CARUMAN BULANAN SIP', { align: 'center' });
+      doc.text('EIS MONTHLY CONTRIBUTION STATEMENT', { align: 'center' });
+      doc.moveDown(0.5);
+      doc.text(`Bulan / Month: ${MONTH_NAMES[data.month - 1]} ${data.year}`, { align: 'center' });
+      doc.moveDown(1);
+
+      // Employer Info
+      doc.fontSize(10).font('Helvetica');
+      drawLabelValue(doc, 'Nama Majikan / Employer:', data.employer.name || 'N/A');
+      drawLabelValue(doc, 'No. Kod Majikan / Employer Code:', data.employer.socso_code || 'N/A');
+      doc.moveDown(1);
+
+      // Table
+      const tableTop = doc.y;
+      const colWidths = [30, 150, 100, 100, 80, 80, 80, 80];
+      const headers = ['No', 'Nama Pekerja / Employee Name', 'No. K/P / IC No', 'No. SIP / EIS No',
+                       'Gaji / Wages (RM)', 'Pekerja / Employee (RM)', 'Majikan / Employer (RM)', 'Jumlah / Total (RM)'];
+
+      let x = 40;
+      doc.font('Helvetica-Bold').fontSize(8);
+      headers.forEach((header, i) => {
+        doc.text(header, x, tableTop, { width: colWidths[i], align: 'center' });
+        x += colWidths[i];
+      });
+
+      doc.moveTo(40, tableTop + 25).lineTo(760, tableTop + 25).stroke();
+
+      // Table rows
+      doc.font('Helvetica').fontSize(8);
+      let rowY = tableTop + 30;
+
+      data.employees.forEach((emp, index) => {
+        if (rowY > 500) {
+          doc.addPage({ layout: 'landscape' });
+          rowY = 50;
+        }
+
+        x = 40;
+        doc.text(String(index + 1), x, rowY, { width: colWidths[0], align: 'center' });
+        x += colWidths[0];
+        doc.text(emp.full_name, x, rowY, { width: colWidths[1] });
+        x += colWidths[1];
+        doc.text(emp.ic_no || '-', x, rowY, { width: colWidths[2], align: 'center' });
+        x += colWidths[2];
+        doc.text(emp.eis_no || '-', x, rowY, { width: colWidths[3], align: 'center' });
+        x += colWidths[3];
+        doc.text(formatAmount(emp.wages), x, rowY, { width: colWidths[4], align: 'right' });
+        x += colWidths[4];
+        doc.text(formatAmount(emp.employee_eis), x, rowY, { width: colWidths[5], align: 'right' });
+        x += colWidths[5];
+        doc.text(formatAmount(emp.employer_eis), x, rowY, { width: colWidths[6], align: 'right' });
+        x += colWidths[6];
+        doc.text(formatAmount(emp.total_eis), x, rowY, { width: colWidths[7], align: 'right' });
+
+        rowY += 15;
+      });
+
+      // Totals
+      doc.moveTo(40, rowY).lineTo(760, rowY).stroke();
+      rowY += 5;
+      doc.font('Helvetica-Bold');
+      x = 40;
+      doc.text('JUMLAH / TOTAL', x, rowY, { width: colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] });
+      x += colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3];
+      doc.text(formatAmount(data.totals.wages), x, rowY, { width: colWidths[4], align: 'right' });
+      x += colWidths[4];
+      doc.text(formatAmount(data.totals.employee_eis), x, rowY, { width: colWidths[5], align: 'right' });
+      x += colWidths[5];
+      doc.text(formatAmount(data.totals.employer_eis), x, rowY, { width: colWidths[6], align: 'right' });
+      x += colWidths[6];
+      doc.text(formatAmount(data.totals.total_eis), x, rowY, { width: colWidths[7], align: 'right' });
+
+      // Summary
+      doc.moveDown(2);
+      doc.fontSize(10);
+      doc.text(`Bilangan Pekerja / Number of Employees: ${data.employees.length}`);
+      doc.text(`Jumlah Caruman / Total Contribution: RM ${formatAmount(data.totals.total_eis)}`);
+
+      // Footer
+      doc.fontSize(8).font('Helvetica')
+        .text(`Dijana pada / Generated on: ${format(new Date(), 'dd/MM/yyyy HH:mm:ss')}`, 40, 550, { align: 'right' });
+
+      doc.end();
+    } catch (error) {
+      reject(error);
+    }
+  });
+};
+
+/**
  * Generate PCB CP39 PDF
  * @param {Object} data - PCB CP39 data
  * @returns {Promise<Buffer>} PDF buffer
@@ -466,6 +574,14 @@ const generateCSV = (type, data) => {
         csv += `${i + 1},"${emp.full_name}","${emp.ic_no || ''}","${emp.socso_no || ''}",${emp.wages},${emp.employee_socso},${emp.employer_socso},${emp.total_socso}\n`;
       });
       csv += `\nTOTAL,,,${data.totals.wages},${data.totals.employee_socso},${data.totals.employer_socso},${data.totals.total_socso}\n`;
+      break;
+
+    case 'eis':
+      csv = 'No,Employee Name,IC No,EIS No,Wages,Employee Contribution,Employer Contribution,Total\n';
+      data.employees.forEach((emp, i) => {
+        csv += `${i + 1},"${emp.full_name}","${emp.ic_no || ''}","${emp.eis_no || ''}",${emp.wages},${emp.employee_eis},${emp.employer_eis},${emp.total_eis}\n`;
+      });
+      csv += `\nTOTAL,,,${data.totals.wages},${data.totals.employee_eis},${data.totals.employer_eis},${data.totals.total_eis}\n`;
       break;
 
     case 'pcb':
@@ -795,6 +911,7 @@ module.exports = {
   generateEAFormPDF,
   generateEPFBorangAPDF,
   generateSOCSOForm8APDF,
+  generateEISLampiran1PDF,
   generatePCBCP39PDF,
   generateCSV,
   generateAnalyticsReport

@@ -65,12 +65,11 @@ const generateEAFormExcel = async (data) => {
   setCell('AI14', employee.socso_no || '');
   setCell('K16', employee.number_of_children || 0);
 
-  // A9: Partial year dates
+  // A8: Tarikh mula bekerja (start date of work) — always show
   if (employee.join_date) {
-    const joinYear = new Date(employee.join_date).getFullYear();
-    if (joinYear === year) {
-      setCell('AI16', format(new Date(employee.join_date), 'dd/MM/yyyy'));
-    }
+    const joinCell = ws.getCell('AI16');
+    joinCell.value = format(new Date(employee.join_date), 'dd/MM/yyyy');
+    joinCell.font = { ...joinCell.font, size: 10 };
   }
   // If employee resigned during the year
   if (employee.employment_status === 'Resigned' && employee.updated_at) {
@@ -114,10 +113,15 @@ const generateEAFormExcel = async (data) => {
   setCell('X67', company.signatory_position || (signatory && signatory.position) || '');
   setCell('X69', company.name || '');
   if (company.address) {
-    setCell('X70', company.address);
+    // Split address into 2 lines (line 1 → X70, line 2 → X71)
+    const addressLines = company.address.split('\n').map(l => l.trim()).filter(Boolean);
+    setCell('X70', addressLines[0] || '');
+    if (addressLines.length > 1) {
+      setCell('X71', addressLines.slice(1).join(', '));
+    }
   }
   setCell('C73', format(new Date(), 'dd/MM/yyyy'));
-  setCell('X73', company.phone || '');
+  setCell('X73', company.employer_phone || company.phone || '');
 
   // Generate buffer
   const buffer = await wb.xlsx.writeBuffer();

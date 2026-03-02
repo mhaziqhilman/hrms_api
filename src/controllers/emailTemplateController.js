@@ -58,9 +58,11 @@ exports.getAllTemplates = async (req, res) => {
       order: [['template_key', 'ASC']]
     });
 
-    // Seed defaults if no templates exist
-    if (templates.length === 0) {
-      const seedData = Object.entries(DEFAULT_TEMPLATES).map(([key, tmpl]) => ({
+    // Seed any missing default templates
+    const existingKeys = templates.map(t => t.template_key);
+    const missingTemplates = Object.entries(DEFAULT_TEMPLATES)
+      .filter(([key]) => !existingKeys.includes(key))
+      .map(([key, tmpl]) => ({
         company_id,
         template_key: key,
         subject: tmpl.subject,
@@ -68,7 +70,9 @@ exports.getAllTemplates = async (req, res) => {
         variables: tmpl.variables,
         is_active: true
       }));
-      await EmailTemplate.bulkCreate(seedData);
+
+    if (missingTemplates.length > 0) {
+      await EmailTemplate.bulkCreate(missingTemplates);
       templates = await EmailTemplate.findAll({
         where: { company_id },
         order: [['template_key', 'ASC']]
@@ -156,10 +160,14 @@ exports.previewTemplate = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Email template not found' });
     }
 
+    // Get actual company name for preview
+    const { Company } = require('../models');
+    const company = await Company.findByPk(company_id, { attributes: ['name'] });
+
     // Sample data for preview
     const sampleData = {
       employee_name: 'John Doe',
-      company_name: 'Acme Corp',
+      company_name: company?.name || 'Your Company',
       reset_link: 'https://example.com/reset?token=sample',
       portal_link: 'https://example.com/login',
       verify_link: 'https://example.com/verify?token=sample',

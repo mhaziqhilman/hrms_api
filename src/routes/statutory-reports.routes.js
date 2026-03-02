@@ -93,6 +93,24 @@ router.get('/socso/:year/:month', adminAccess, statutoryReportsController.getSOC
 router.get('/socso/:year/:month/pdf', adminAccess, statutoryReportsController.downloadSOCSOForm8APDF);
 
 /**
+ * EIS Lampiran 1 Routes (Monthly)
+ */
+
+/**
+ * @route   GET /api/statutory-reports/eis/:year/:month
+ * @desc    Get EIS Lampiran 1 data
+ * @access  Admin, Super Admin
+ */
+router.get('/eis/:year/:month', adminAccess, statutoryReportsController.getEISLampiran1);
+
+/**
+ * @route   GET /api/statutory-reports/eis/:year/:month/pdf
+ * @desc    Download EIS Lampiran 1 as PDF
+ * @access  Admin, Super Admin
+ */
+router.get('/eis/:year/:month/pdf', adminAccess, statutoryReportsController.downloadEISLampiran1PDF);
+
+/**
  * PCB CP39 Routes (Monthly)
  */
 

@@ -53,6 +53,20 @@ const getTemplate = async (companyId, templateKey) => {
 };
 
 /**
+ * Get company name from DB
+ */
+const getCompanyName = async (companyId) => {
+  try {
+    if (!companyId) return 'HRMS';
+    const { Company } = require('../models');
+    const company = await Company.findByPk(companyId, { attributes: ['name'] });
+    return company?.name || 'HRMS';
+  } catch {
+    return 'HRMS';
+  }
+};
+
+/**
  * Replace {{variable}} placeholders in a template string
  */
 const replaceVariables = (text, variables) => {
@@ -76,15 +90,56 @@ const textToHtml = (text) => {
 };
 
 /**
- * Create email transporter
+ * Create default email transporter (from env vars)
  */
-const createTransporter = () => {
+const createDefaultTransporter = () => {
   return nodemailer.createTransport({
     host: emailConfig.host,
     port: emailConfig.port,
     secure: emailConfig.secure,
     auth: emailConfig.auth
   });
+};
+
+/**
+ * Get company-specific transporter or fall back to default
+ * @param {Number} companyId - Company ID
+ * @returns {{ transporter, fromName, fromEmail }}
+ */
+const getCompanyTransporter = async (companyId) => {
+  try {
+    if (companyId) {
+      const { EmailConfiguration } = require('../models');
+      const { decrypt } = require('../utils/encryption');
+      const config = await EmailConfiguration.findOne({
+        where: { company_id: companyId, is_active: true }
+      });
+
+      if (config) {
+        const password = decrypt(config.smtp_password);
+        const transporter = nodemailer.createTransport({
+          host: config.smtp_host,
+          port: config.smtp_port,
+          secure: config.smtp_secure,
+          auth: { user: config.smtp_user, pass: password }
+        });
+        return {
+          transporter,
+          fromName: config.from_name || emailConfig.from.name,
+          fromEmail: config.from_email || config.smtp_user
+        };
+      }
+    }
+  } catch (error) {
+    logger.error(`Failed to get company transporter for company ${companyId}: ${error.message}`);
+  }
+
+  // Fall back to default
+  return {
+    transporter: createDefaultTransporter(),
+    fromName: emailConfig.from.name,
+    fromEmail: emailConfig.from.email
+  };
 };
 
 /**
@@ -95,13 +150,14 @@ const createTransporter = () => {
  * @param {String} options.html - HTML content
  * @param {String} options.text - Plain text content
  * @param {Array} options.attachments - Attachments
+ * @param {Number} options.companyId - Company ID for company-specific SMTP
  */
 const sendEmail = async (options) => {
   try {
-    const transporter = createTransporter();
+    const { transporter, fromName, fromEmail } = await getCompanyTransporter(options.companyId);
 
     const mailOptions = {
-      from: `${emailConfig.from.name} <${emailConfig.from.email}>`,
+      from: `${fromName} <${fromEmail}>`,
       to: options.to,
       subject: options.subject,
       html: options.html,
@@ -127,11 +183,13 @@ const sendPasswordResetEmail = async (email, resetToken, userName, companyId) =>
 
   const dbTemplate = await getTemplate(companyId, 'password_reset');
   if (dbTemplate) {
-    const vars = { employee_name: userName, reset_link: resetUrl, company_name: 'HRMS' };
+    const companyName = await getCompanyName(companyId);
+    const vars = { employee_name: userName, reset_link: resetUrl, company_name: companyName };
     return await sendEmail({
       to: email,
       subject: replaceVariables(dbTemplate.subject, vars),
-      html: textToHtml(replaceVariables(dbTemplate.body, vars))
+      html: textToHtml(replaceVariables(dbTemplate.body, vars)),
+      companyId
     });
   }
 
@@ -150,7 +208,8 @@ const sendPasswordResetEmail = async (email, resetToken, userName, companyId) =>
   return await sendEmail({
     to: email,
     subject: emailConfig.templates.resetPassword.subject,
-    html
+    html,
+    companyId
   });
 };
 
@@ -162,12 +221,14 @@ const sendPayslipNotification = async (email, employeeName, month, year, payslip
 
   const dbTemplate = await getTemplate(companyId, 'payslip');
   if (dbTemplate) {
-    const vars = { employee_name: employeeName, month, year, portal_link: `${process.env.FRONTEND_URL}/payslip`, company_name: 'HRMS' };
+    const companyName = await getCompanyName(companyId);
+    const vars = { employee_name: employeeName, month, year, portal_link: `${process.env.FRONTEND_URL}/payslip`, company_name: companyName };
     return await sendEmail({
       to: email,
       subject: replaceVariables(dbTemplate.subject, vars),
       html: textToHtml(replaceVariables(dbTemplate.body, vars)),
-      attachments
+      attachments,
+      companyId
     });
   }
 
@@ -185,7 +246,8 @@ const sendPayslipNotification = async (email, employeeName, month, year, payslip
     to: email,
     subject: `Payslip for ${month} ${year}`,
     html,
-    attachments
+    attachments,
+    companyId
   });
 };
 
@@ -195,11 +257,13 @@ const sendPayslipNotification = async (email, employeeName, month, year, payslip
 const sendLeaveStatusNotification = async (email, employeeName, leaveType, status, remarks, companyId) => {
   const dbTemplate = await getTemplate(companyId, 'leave_status');
   if (dbTemplate) {
-    const vars = { employee_name: employeeName, leave_type: leaveType, status, remarks: remarks || '', company_name: 'HRMS' };
+    const companyName = await getCompanyName(companyId);
+    const vars = { employee_name: employeeName, leave_type: leaveType, status, remarks: remarks || '', company_name: companyName };
     return await sendEmail({
       to: email,
       subject: replaceVariables(dbTemplate.subject, vars),
-      html: textToHtml(replaceVariables(dbTemplate.body, vars))
+      html: textToHtml(replaceVariables(dbTemplate.body, vars)),
+      companyId
     });
   }
 
@@ -218,7 +282,8 @@ const sendLeaveStatusNotification = async (email, employeeName, leaveType, statu
   return await sendEmail({
     to: email,
     subject: `Leave Request ${status}`,
-    html
+    html,
+    companyId
   });
 };
 
@@ -325,11 +390,13 @@ const sendInvitationEmail = async (email, inviterName, companyName, invitationTo
 const sendClaimStatusNotification = async (email, employeeName, claimAmount, status, remarks, companyId) => {
   const dbTemplate = await getTemplate(companyId, 'claim_status');
   if (dbTemplate) {
-    const vars = { employee_name: employeeName, claim_amount: `RM${claimAmount}`, status, remarks: remarks || '', company_name: 'HRMS' };
+    const companyName = await getCompanyName(companyId);
+    const vars = { employee_name: employeeName, claim_amount: `RM${claimAmount}`, status, remarks: remarks || '', company_name: companyName };
     return await sendEmail({
       to: email,
       subject: replaceVariables(dbTemplate.subject, vars),
-      html: textToHtml(replaceVariables(dbTemplate.body, vars))
+      html: textToHtml(replaceVariables(dbTemplate.body, vars)),
+      companyId
     });
   }
 
@@ -350,7 +417,8 @@ const sendClaimStatusNotification = async (email, employeeName, claimAmount, sta
   return await sendEmail({
     to: email,
     subject: `Claim ${status}`,
-    html
+    html,
+    companyId
   });
 };
 
@@ -362,12 +430,14 @@ const sendEAFormNotification = async (email, employeeName, year, pdfBuffer, comp
 
   const dbTemplate = await getTemplate(companyId, 'ea_form');
   if (dbTemplate) {
-    const vars = { employee_name: employeeName, year: String(year), company_name: 'HRMS' };
+    const companyName = await getCompanyName(companyId);
+    const vars = { employee_name: employeeName, year: String(year), company_name: companyName };
     return await sendEmail({
       to: email,
       subject: replaceVariables(dbTemplate.subject, vars),
       html: textToHtml(replaceVariables(dbTemplate.body, vars)),
-      attachments
+      attachments,
+      companyId
     });
   }
 
@@ -387,7 +457,8 @@ const sendEAFormNotification = async (email, employeeName, year, pdfBuffer, comp
     to: email,
     subject: `EA Form ${year} - Statement of Remuneration`,
     html,
-    attachments
+    attachments,
+    companyId
   });
 };
 

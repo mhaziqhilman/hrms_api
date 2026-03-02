@@ -18,6 +18,10 @@ logs/
 .DS_Store
 Thumbs.db
 
+# Excel temp/lock files
+~$*.xlsx
+~$*.xls
+
 # IDE
 .vscode/
 .idea/

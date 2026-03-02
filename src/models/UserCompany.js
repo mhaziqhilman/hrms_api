@@ -44,6 +44,11 @@ const UserCompany = sequelize.define('UserCompany', {
     allowNull: false,
     defaultValue: DataTypes.NOW,
     field: 'joined_at'
+  },
+  status: {
+    type: DataTypes.ENUM('active', 'inactive'),
+    allowNull: false,
+    defaultValue: 'active'
   }
 }, {
   tableName: 'user_companies',

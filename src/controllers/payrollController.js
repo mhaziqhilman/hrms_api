@@ -6,9 +6,8 @@ const YTDStatutory = require('../models/YTDStatutory');
 const { Op } = require('sequelize');
 const { sequelize } = require('../config/database');
 const logger = require('../utils/logger');
-const { calculateAllStatutory } = require('../utils/statutoryCalculations');
+const { calculateAllStatutory, getCompanyRates } = require('../utils/statutoryCalculations');
 const { sendPayslipNotification, shouldSendEmail } = require('../services/emailService');
-const { generatePayslipPDF } = require('../services/payslipPdfService');
 const storageService = require('../services/supabaseStorageService');
 
 const MONTH_NAMES = [
@@ -225,8 +224,12 @@ exports.calculatePayroll = async (req, res, next) => {
     const ytdEpf = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.epf_employee || 0), 0);
     const ytdPcbDeducted = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.pcb_deduction || 0), 0);
 
+    // Fetch company-specific statutory rates from DB
+    const rateOverrides = await getCompanyRates(req.user.company_id);
+
     // Calculate statutory deductions with employee profile and YTD data
     const statutory = calculateAllStatutory(gross_salary, {
+      rateOverrides,
       employee: {
         tax_category: employee.tax_category || 'KA',
         number_of_children: employee.number_of_children || 0,
@@ -370,7 +373,11 @@ exports.updatePayroll = async (req, res, next) => {
       const ytdEpf = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.epf_employee || 0), 0);
       const ytdPcbDeducted = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.pcb_deduction || 0), 0);
 
+      // Fetch company-specific statutory rates from DB
+      const rateOverrides = await getCompanyRates(req.user.company_id);
+
       const statutory = calculateAllStatutory(gross_salary, {
+        rateOverrides,
         employee: {
           tax_category: employee?.tax_category || 'KA',
           number_of_children: employee?.number_of_children || 0,
@@ -811,44 +818,40 @@ exports.generatePayslip = async (req, res, next) => {
 };
 
 /**
- * Send payslip via email with PDF attachment
+ * Download payslip as PDF (server-generated, native vector text)
  */
-exports.sendPayslipEmail = async (req, res, next) => {
+exports.downloadPayslipPdf = async (req, res, next) => {
   try {
     const { id } = req.params;
+    const { generatePayslipPDF } = require('../services/payslipPdfService');
 
     const payroll = await Payroll.findByPk(id, {
-      include: [
-        {
-          model: Employee,
-          as: 'employee',
-          attributes: [
-            'id', 'employee_id', 'full_name', 'ic_no', 'user_id',
-            'position', 'department', 'bank_name',
-            'bank_account_no', 'epf_no', 'socso_no', 'tax_no'
-          ],
-          where: { company_id: req.user.company_id },
-          required: true
-        }
-      ]
+      include: [{
+        model: Employee,
+        as: 'employee',
+        attributes: [
+          'id', 'employee_id', 'full_name', 'ic_no',
+          'position', 'department', 'bank_name',
+          'bank_account_no', 'epf_no', 'socso_no', 'tax_no'
+        ],
+        where: { company_id: req.user.company_id },
+        required: true
+      }]
     });
 
     if (!payroll) {
       return res.status(404).json({ success: false, message: 'Payroll record not found' });
     }
 
-    if (!payroll.employee.user_id) {
-      return res.status(400).json({ success: false, message: 'Employee does not have a linked user account' });
+    if (req.user.role === 'Staff' && req.user.employee_id !== payroll.employee_id) {
+      return res.status(403).json({ success: false, message: 'You do not have permission to download this payslip' });
     }
 
-    const user = await User.findByPk(payroll.employee.user_id, { attributes: ['id', 'email'] });
-    if (!user || !user.email) {
-      return res.status(400).json({ success: false, message: 'Employee email not found' });
-    }
+    const company = await Company.findByPk(req.user.company_id, {
+      attributes: ['name', 'registration_no']
+    });
 
-    const company = await Company.findByPk(req.user.company_id, { attributes: ['name', 'registration_no', 'logo_url'] });
-
-    // Fetch YTD data
+    // Fetch YTD statutory data
     const ytdRecord = await YTDStatutory.findOne({
       where: { employee_id: payroll.employee_id, year: payroll.year, month: payroll.month }
     });
@@ -861,23 +864,16 @@ exports.sendPayslipEmail = async (req, res, next) => {
         })
       : null;
 
-    // Build payslip data (same format as generatePayslip)
     const payslipData = {
+      payroll_id: payroll.id,
       employee: {
-        id: payroll.employee.id,
         employee_id: payroll.employee.employee_id,
         full_name: payroll.employee.full_name,
         ic_no: payroll.employee.ic_no,
         position: payroll.employee.position,
         department: payroll.employee.department
       },
-      pay_period: {
-        month: payroll.month,
-        year: payroll.year,
-        start_date: payroll.pay_period_start,
-        end_date: payroll.pay_period_end,
-        payment_date: payroll.payment_date
-      },
+      pay_period: { month: payroll.month, year: payroll.year },
       earnings: {
         basic_salary: parseFloat(payroll.basic_salary),
         allowances: parseFloat(payroll.allowances),
@@ -918,11 +914,65 @@ exports.sendPayslipEmail = async (req, res, next) => {
       generated_at: new Date().toISOString()
     };
 
-    const pdfBuffer = await generatePayslipPDF(payslipData, company?.name || 'Company', company?.registration_no || '');
+    const pdfBuffer = await generatePayslipPDF(payslipData, company?.name, company?.registration_no);
+
+    const monthName = MONTH_NAMES[payroll.month - 1];
+    const fileName = `Payslip - ${monthName} ${payroll.year} (${payroll.employee.full_name}).pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.send(pdfBuffer);
+  } catch (error) {
+    logger.error(`Error downloading payslip PDF for payroll ${req.params.id}:`, error);
+    next(error);
+  }
+};
+
+/**
+ * Send payslip via email with PDF attachment
+ */
+exports.sendPayslipEmail = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'PDF attachment is required' });
+    }
+
+    const payroll = await Payroll.findByPk(id, {
+      include: [
+        {
+          model: Employee,
+          as: 'employee',
+          attributes: ['id', 'employee_id', 'full_name', 'user_id', 'email'],
+          where: { company_id: req.user.company_id },
+          required: true
+        }
+      ]
+    });
+
+    if (!payroll) {
+      return res.status(404).json({ success: false, message: 'Payroll record not found' });
+    }
+
+    let recipientEmail = null;
+    if (payroll.employee.user_id) {
+      const user = await User.findByPk(payroll.employee.user_id, { attributes: ['id', 'email'] });
+      if (user?.email) recipientEmail = user.email;
+    }
+    if (!recipientEmail) {
+      recipientEmail = payroll.employee.email;
+    }
+    if (!recipientEmail) {
+      return res.status(400).json({ success: false, message: 'Employee email not found' });
+    }
+
+    const pdfBuffer = req.file.buffer;
     const monthName = MONTH_NAMES[payroll.month - 1];
 
     await sendPayslipNotification(
-      user.email,
+      recipientEmail,
       payroll.employee.full_name,
       monthName,
       payroll.year,
@@ -931,11 +981,11 @@ exports.sendPayslipEmail = async (req, res, next) => {
       pdfBuffer
     );
 
-    logger.info(`Payslip email sent for payroll ${id} to ${user.email}`);
+    logger.info(`Payslip email sent for payroll ${id} to ${recipientEmail}`);
 
     res.status(200).json({
       success: true,
-      message: `Payslip sent to ${user.email}`
+      message: `Payslip sent to ${recipientEmail}`
     });
   } catch (error) {
     logger.error(`Error sending payslip email for payroll ${req.params.id}:`, error);

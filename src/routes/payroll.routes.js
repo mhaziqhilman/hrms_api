@@ -1,8 +1,11 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const payrollController = require('../controllers/payrollController');
 const { verifyToken } = require('../middleware/auth.middleware');
 const { requireRole, requireAdmin, requireManager } = require('../middleware/rbac.middleware');
+
+const pdfUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } }).single('pdf');
 const { body, param, query, validationResult } = require('express-validator');
 
 // Validation middleware
@@ -136,6 +139,19 @@ router.post('/bulk-cancel', verifyToken, requireAdmin, bulkIdsValidation, valida
 router.post('/bulk-delete', verifyToken, requireAdmin, bulkIdsValidation, validate, payrollController.bulkPermanentDeletePayroll);
 
 /**
+ * @route   GET /api/payroll/:id/payslip/download
+ * @desc    Download payslip as PDF
+ * @access  Private (Admin, Manager, Staff - own records only)
+ */
+router.get(
+  '/:id/payslip/download',
+  verifyToken,
+  idParamValidation,
+  validate,
+  payrollController.downloadPayslipPdf
+);
+
+/**
  * @route   POST /api/payroll/:id/payslip/send-email
  * @desc    Send payslip via email with PDF attachment
  * @access  Private (Admin)
@@ -144,6 +160,7 @@ router.post(
   '/:id/payslip/send-email',
   verifyToken,
   requireAdmin,
+  pdfUpload,
   idParamValidation,
   validate,
   payrollController.sendPayslipEmail

@@ -9,6 +9,7 @@ const { roundToTwo } = require('../utils/helpers');
 const {
   generateEPFBorangAPDF,
   generateSOCSOForm8APDF,
+  generateEISLampiran1PDF,
   generatePCBCP39PDF,
   generateCSV
 } = require('../services/reportGeneratorService');
@@ -42,6 +43,7 @@ async function getCompanyInfo(userId) {
     lhdn_branch: company.lhdn_branch || '',
     address: company.address || '',
     phone: company.phone || '',
+    employer_phone: company.employer_phone || '',
     _raw: company
   };
 }
@@ -50,8 +52,10 @@ async function getCompanyInfo(userId) {
  * Shared helper: fetch employee, payroll records, calculate totals, and return
  * the data object needed by both the Excel and PDF EA form generators.
  */
-async function buildEAFormData(userId, employeeId, year) {
-  const employee = await Employee.findByPk(employeeId);
+async function buildEAFormData(userId, employeeId, year, companyId) {
+  const employee = await Employee.findOne({
+    where: { id: employeeId, ...(companyId ? { company_id: companyId } : {}) }
+  });
   if (!employee) return { error: 'Employee not found' };
 
   const payrollRecords = await Payroll.findAll({
@@ -134,8 +138,10 @@ exports.getEAForm = async (req, res, next) => {
   try {
     const { employee_id, year } = req.params;
 
-    // Get employee details
-    const employee = await Employee.findByPk(employee_id);
+    // Get employee details (scoped to current company)
+    const employee = await Employee.findOne({
+      where: { id: employee_id, company_id: req.user.company_id }
+    });
     if (!employee) {
       return res.status(404).json({
         success: false,
@@ -264,7 +270,7 @@ exports.downloadEAFormPDF = async (req, res, next) => {
   try {
     const { employee_id, year } = req.params;
 
-    const data = await buildEAFormData(req.user.id, employee_id, year);
+    const data = await buildEAFormData(req.user.id, employee_id, year, req.user.company_id);
     if (data.error) {
       return res.status(404).json({ success: false, message: data.error });
     }
@@ -293,7 +299,7 @@ exports.downloadEAFormExcel = async (req, res, next) => {
   try {
     const { employee_id, year } = req.params;
 
-    const data = await buildEAFormData(req.user.id, employee_id, year);
+    const data = await buildEAFormData(req.user.id, employee_id, year, req.user.company_id);
     if (data.error) {
       return res.status(404).json({ success: false, message: data.error });
     }
@@ -318,19 +324,22 @@ exports.sendEAFormEmail = async (req, res, next) => {
   try {
     const { employee_id, year } = req.params;
 
-    const data = await buildEAFormData(req.user.id, employee_id, year);
+    const data = await buildEAFormData(req.user.id, employee_id, year, req.user.company_id);
     if (data.error) {
       return res.status(404).json({ success: false, message: data.error });
     }
 
-    // Get employee's user email
-    const employee = await Employee.findByPk(employee_id, { attributes: ['user_id', 'full_name'] });
-    if (!employee?.user_id) {
-      return res.status(400).json({ success: false, message: 'Employee does not have a linked user account' });
+    // Get employee's email (prefer user account email, fall back to employee email)
+    const employee = await Employee.findByPk(employee_id, { attributes: ['user_id', 'full_name', 'email'] });
+    let recipientEmail = null;
+    if (employee?.user_id) {
+      const user = await User.findByPk(employee.user_id, { attributes: ['email'] });
+      if (user?.email) recipientEmail = user.email;
     }
-
-    const user = await User.findByPk(employee.user_id, { attributes: ['email'] });
-    if (!user?.email) {
+    if (!recipientEmail) {
+      recipientEmail = employee?.email;
+    }
+    if (!recipientEmail) {
       return res.status(400).json({ success: false, message: 'Employee email not found' });
     }
 
@@ -339,18 +348,18 @@ exports.sendEAFormEmail = async (req, res, next) => {
     const pdfBuffer = await convertAsync(excelBuffer, '.pdf', undefined);
 
     await sendEAFormNotification(
-      user.email,
+      recipientEmail,
       employee.full_name,
       year,
       pdfBuffer,
       req.user.company_id
     );
 
-    logger.info(`EA Form email sent for employee ${employee_id}, year ${year} to ${user.email}`);
+    logger.info(`EA Form email sent for employee ${employee_id}, year ${year} to ${recipientEmail}`);
 
     res.status(200).json({
       success: true,
-      message: `EA Form sent to ${user.email}`
+      message: `EA Form sent to ${recipientEmail}`
     });
   } catch (error) {
     logger.error('Error sending EA Form email:', error);
@@ -374,7 +383,9 @@ exports.getEPFBorangA = async (req, res, next) => {
       include: [{
         model: Employee,
         as: 'employee',
-        attributes: ['id', 'employee_id', 'full_name', 'ic_no', 'epf_no']
+        attributes: ['id', 'employee_id', 'full_name', 'ic_no', 'epf_no'],
+        where: { company_id: req.user.company_id },
+        required: true
       }],
       order: [['employee', 'full_name', 'ASC']]
     });
@@ -449,7 +460,9 @@ exports.downloadEPFBorangAPDF = async (req, res, next) => {
       include: [{
         model: Employee,
         as: 'employee',
-        attributes: ['id', 'employee_id', 'full_name', 'ic_no', 'epf_no']
+        attributes: ['id', 'employee_id', 'full_name', 'ic_no', 'epf_no'],
+        where: { company_id: req.user.company_id },
+        required: true
       }]
     });
 
@@ -517,7 +530,9 @@ exports.getSOCSOForm8A = async (req, res, next) => {
       include: [{
         model: Employee,
         as: 'employee',
-        attributes: ['id', 'employee_id', 'full_name', 'ic_no', 'socso_no']
+        attributes: ['id', 'employee_id', 'full_name', 'ic_no', 'socso_no'],
+        where: { company_id: req.user.company_id },
+        required: true
       }],
       order: [['employee', 'full_name', 'ASC']]
     });
@@ -592,7 +607,9 @@ exports.downloadSOCSOForm8APDF = async (req, res, next) => {
       include: [{
         model: Employee,
         as: 'employee',
-        attributes: ['id', 'employee_id', 'full_name', 'ic_no', 'socso_no']
+        attributes: ['id', 'employee_id', 'full_name', 'ic_no', 'socso_no'],
+        where: { company_id: req.user.company_id },
+        required: true
       }]
     });
 
@@ -645,6 +662,153 @@ exports.downloadSOCSOForm8APDF = async (req, res, next) => {
 };
 
 /**
+ * Get EIS Lampiran 1 data (monthly)
+ */
+exports.getEISLampiran1 = async (req, res, next) => {
+  try {
+    const { year, month } = req.params;
+
+    const payrollRecords = await Payroll.findAll({
+      where: {
+        year: parseInt(year),
+        month: parseInt(month),
+        status: { [Op.in]: ['Approved', 'Paid'] }
+      },
+      include: [{
+        model: Employee,
+        as: 'employee',
+        attributes: ['id', 'employee_id', 'full_name', 'ic_no', 'socso_no'],
+        where: { company_id: req.user.company_id },
+        required: true
+      }],
+      order: [['employee', 'full_name', 'ASC']]
+    });
+
+    if (payrollRecords.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No payroll records found for this period'
+      });
+    }
+
+    const employees = payrollRecords.map(record => ({
+      employee_id: record.employee.employee_id,
+      full_name: record.employee.full_name,
+      ic_no: record.employee.ic_no,
+      eis_no: record.employee.socso_no,
+      wages: roundToTwo(parseFloat(record.gross_salary) || 0),
+      employee_eis: roundToTwo(parseFloat(record.eis_employee) || 0),
+      employer_eis: roundToTwo(parseFloat(record.eis_employer) || 0),
+      total_eis: roundToTwo((parseFloat(record.eis_employee) || 0) + (parseFloat(record.eis_employer) || 0))
+    }));
+
+    const totals = employees.reduce((acc, emp) => {
+      acc.wages += emp.wages;
+      acc.employee_eis += emp.employee_eis;
+      acc.employer_eis += emp.employer_eis;
+      acc.total_eis += emp.total_eis;
+      return acc;
+    }, { wages: 0, employee_eis: 0, employer_eis: 0, total_eis: 0 });
+
+    const companyInfo = await getCompanyInfo(req.user.id);
+
+    const reportData = {
+      year: parseInt(year),
+      month: parseInt(month),
+      employer: companyInfo,
+      employees,
+      totals: {
+        wages: roundToTwo(totals.wages),
+        employee_eis: roundToTwo(totals.employee_eis),
+        employer_eis: roundToTwo(totals.employer_eis),
+        total_eis: roundToTwo(totals.total_eis)
+      },
+      employee_count: employees.length
+    };
+
+    logger.info(`EIS Lampiran 1 generated for ${month}/${year}`, { user_id: req.user.id });
+
+    res.status(200).json({
+      success: true,
+      data: reportData
+    });
+  } catch (error) {
+    logger.error('Error generating EIS Lampiran 1:', error);
+    next(error);
+  }
+};
+
+/**
+ * Download EIS Lampiran 1 as PDF
+ */
+exports.downloadEISLampiran1PDF = async (req, res, next) => {
+  try {
+    const { year, month } = req.params;
+
+    const payrollRecords = await Payroll.findAll({
+      where: {
+        year: parseInt(year),
+        month: parseInt(month),
+        status: { [Op.in]: ['Approved', 'Paid'] }
+      },
+      include: [{
+        model: Employee,
+        as: 'employee',
+        attributes: ['id', 'employee_id', 'full_name', 'ic_no', 'socso_no'],
+        where: { company_id: req.user.company_id },
+        required: true
+      }]
+    });
+
+    if (payrollRecords.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No payroll records found'
+      });
+    }
+
+    const employees = payrollRecords.map(record => ({
+      full_name: record.employee.full_name,
+      ic_no: record.employee.ic_no,
+      eis_no: record.employee.socso_no,
+      wages: roundToTwo(parseFloat(record.gross_salary) || 0),
+      employee_eis: roundToTwo(parseFloat(record.eis_employee) || 0),
+      employer_eis: roundToTwo(parseFloat(record.eis_employer) || 0),
+      total_eis: roundToTwo((parseFloat(record.eis_employee) || 0) + (parseFloat(record.eis_employer) || 0))
+    }));
+
+    const totals = employees.reduce((acc, emp) => {
+      acc.wages += emp.wages;
+      acc.employee_eis += emp.employee_eis;
+      acc.employer_eis += emp.employer_eis;
+      acc.total_eis += emp.total_eis;
+      return acc;
+    }, { wages: 0, employee_eis: 0, employer_eis: 0, total_eis: 0 });
+
+    const companyInfo = await getCompanyInfo(req.user.id);
+
+    const reportData = {
+      year: parseInt(year),
+      month: parseInt(month),
+      employer: companyInfo,
+      employees,
+      totals
+    };
+
+    const pdfBuffer = await generateEISLampiran1PDF(reportData);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=EIS_Lampiran_1_${year}_${String(month).padStart(2, '0')}.pdf`);
+    res.send(pdfBuffer);
+
+    logger.info(`EIS Lampiran 1 PDF downloaded for ${month}/${year}`);
+  } catch (error) {
+    logger.error('Error generating EIS Lampiran 1 PDF:', error);
+    next(error);
+  }
+};
+
+/**
  * Get PCB CP39 data (monthly)
  */
 exports.getPCBCP39 = async (req, res, next) => {
@@ -660,7 +824,9 @@ exports.getPCBCP39 = async (req, res, next) => {
       include: [{
         model: Employee,
         as: 'employee',
-        attributes: ['id', 'employee_id', 'full_name', 'ic_no', 'tax_no']
+        attributes: ['id', 'employee_id', 'full_name', 'ic_no', 'tax_no'],
+        where: { company_id: req.user.company_id },
+        required: true
       }],
       order: [['employee', 'full_name', 'ASC']]
     });
@@ -732,7 +898,9 @@ exports.downloadPCBCP39PDF = async (req, res, next) => {
       include: [{
         model: Employee,
         as: 'employee',
-        attributes: ['id', 'employee_id', 'full_name', 'ic_no', 'tax_no']
+        attributes: ['id', 'employee_id', 'full_name', 'ic_no', 'tax_no'],
+        where: { company_id: req.user.company_id },
+        required: true
       }]
     });
 
@@ -803,7 +971,9 @@ exports.downloadCSV = async (req, res, next) => {
           include: [{
             model: Employee,
             as: 'employee',
-            attributes: ['full_name', 'ic_no', 'epf_no']
+            attributes: ['full_name', 'ic_no', 'epf_no'],
+            where: { company_id: req.user.company_id },
+            required: true
           }]
         });
 
@@ -838,7 +1008,9 @@ exports.downloadCSV = async (req, res, next) => {
           include: [{
             model: Employee,
             as: 'employee',
-            attributes: ['full_name', 'ic_no', 'socso_no']
+            attributes: ['full_name', 'ic_no', 'socso_no'],
+            where: { company_id: req.user.company_id },
+            required: true
           }]
         });
 
@@ -863,6 +1035,43 @@ exports.downloadCSV = async (req, res, next) => {
         filename = `SOCSO_${year}_${String(month).padStart(2, '0')}.csv`;
         break;
 
+      case 'eis':
+        const eisRecords = await Payroll.findAll({
+          where: {
+            year: parseInt(year),
+            month: parseInt(month),
+            status: { [Op.in]: ['Approved', 'Paid'] }
+          },
+          include: [{
+            model: Employee,
+            as: 'employee',
+            attributes: ['full_name', 'ic_no', 'socso_no'],
+            where: { company_id: req.user.company_id },
+            required: true
+          }]
+        });
+
+        reportData = {
+          employees: eisRecords.map(r => ({
+            full_name: r.employee.full_name,
+            ic_no: r.employee.ic_no,
+            eis_no: r.employee.socso_no,
+            wages: parseFloat(r.gross_salary),
+            employee_eis: parseFloat(r.eis_employee),
+            employer_eis: parseFloat(r.eis_employer),
+            total_eis: parseFloat(r.eis_employee) + parseFloat(r.eis_employer)
+          })),
+          totals: eisRecords.reduce((acc, r) => {
+            acc.wages += parseFloat(r.gross_salary);
+            acc.employee_eis += parseFloat(r.eis_employee);
+            acc.employer_eis += parseFloat(r.eis_employer);
+            acc.total_eis += parseFloat(r.eis_employee) + parseFloat(r.eis_employer);
+            return acc;
+          }, { wages: 0, employee_eis: 0, employer_eis: 0, total_eis: 0 })
+        };
+        filename = `EIS_${year}_${String(month).padStart(2, '0')}.csv`;
+        break;
+
       case 'pcb':
         const pcbRecords = await Payroll.findAll({
           where: {
@@ -873,7 +1082,9 @@ exports.downloadCSV = async (req, res, next) => {
           include: [{
             model: Employee,
             as: 'employee',
-            attributes: ['full_name', 'ic_no', 'tax_no']
+            attributes: ['full_name', 'ic_no', 'tax_no'],
+            where: { company_id: req.user.company_id },
+            required: true
           }]
         });
 
@@ -923,13 +1134,20 @@ exports.getAvailablePeriods = async (req, res, next) => {
   try {
     const periods = await Payroll.findAll({
       attributes: [
-        [Payroll.sequelize.fn('DISTINCT', Payroll.sequelize.col('year')), 'year'],
+        [Payroll.sequelize.fn('DISTINCT', Payroll.sequelize.col('Payroll.year')), 'year'],
         'month'
       ],
       where: {
         status: { [Op.in]: ['Approved', 'Paid'] }
       },
-      group: ['year', 'month'],
+      include: [{
+        model: Employee,
+        as: 'employee',
+        attributes: [],
+        where: { company_id: req.user.company_id },
+        required: true
+      }],
+      group: ['Payroll.year', 'Payroll.month'],
       order: [['year', 'DESC'], ['month', 'DESC']],
       raw: true
     });
@@ -960,7 +1178,7 @@ exports.getEmployeesForEA = async (req, res, next) => {
   try {
     const { year } = req.params;
 
-    // Get employees who have payroll in the specified year
+    // Get employees who have payroll in the specified year (scoped to current company)
     const payrollRecords = await Payroll.findAll({
       where: {
         year: parseInt(year),
@@ -969,7 +1187,9 @@ exports.getEmployeesForEA = async (req, res, next) => {
       include: [{
         model: Employee,
         as: 'employee',
-        attributes: ['id', 'employee_id', 'full_name', 'ic_no', 'department', 'position']
+        attributes: ['id', 'employee_id', 'full_name', 'ic_no', 'department', 'position'],
+        where: { company_id: req.user.company_id },
+        required: true
       }],
       attributes: [[col('Payroll.employee_id'), 'employee_id']],
       group: ['Payroll.employee_id', 'employee.id', 'employee.employee_id', 'employee.full_name', 'employee.ic_no', 'employee.department', 'employee.position'],

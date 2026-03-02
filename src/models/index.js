@@ -22,6 +22,7 @@ const UserSettings = require('./UserSettings');
 const PublicHoliday = require('./PublicHoliday');
 const StatutoryConfig = require('./StatutoryConfig');
 const EmailTemplate = require('./EmailTemplate');
+const EmailConfiguration = require('./EmailConfiguration');
 const AnnouncementCategory = require('./AnnouncementCategory');
 const Notification = require('./Notification');
 
@@ -210,6 +211,10 @@ StatutoryConfig.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
 Company.hasMany(EmailTemplate, { foreignKey: 'company_id', as: 'email_templates' });
 EmailTemplate.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
 
+// Company - EmailConfiguration (One-to-One)
+Company.hasOne(EmailConfiguration, { foreignKey: 'company_id', as: 'email_configuration' });
+EmailConfiguration.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
 // Company - LeaveType (One-to-Many)
 Company.hasMany(LeaveType, { foreignKey: 'company_id', as: 'leave_types' });
 LeaveType.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
@@ -258,6 +263,7 @@ module.exports = {
   PublicHoliday,
   StatutoryConfig,
   EmailTemplate,
+  EmailConfiguration,
   AnnouncementCategory,
   Notification,
   syncDatabase

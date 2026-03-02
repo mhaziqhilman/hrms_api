@@ -8,7 +8,8 @@ const DEFAULT_CONFIGS = [
   { config_key: 'epf_employer_rate_above_5000', config_value: '0.12', description: 'EPF employer rate for salary > RM5,000 (12%)' },
   { config_key: 'epf_employer_threshold', config_value: '5000', description: 'EPF employer rate salary threshold (RM)' },
   { config_key: 'socso_max_salary', config_value: '6000', description: 'SOCSO maximum salary cap (RM) - uses official wage-band table' },
-  { config_key: 'eis_max_salary', config_value: '6000', description: 'EIS maximum salary cap (RM) - uses official wage-band table' }
+  { config_key: 'eis_max_salary', config_value: '6000', description: 'EIS maximum salary cap (RM) - uses official wage-band table' },
+  { config_key: 'pcb_minimum_threshold', config_value: 'false', description: 'Zero out PCB when monthly amount is less than RM10' }
 ];
 
 /**
