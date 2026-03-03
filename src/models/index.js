@@ -25,6 +25,7 @@ const EmailTemplate = require('./EmailTemplate');
 const EmailConfiguration = require('./EmailConfiguration');
 const AnnouncementCategory = require('./AnnouncementCategory');
 const Notification = require('./Notification');
+const Feedback = require('./Feedback');
 
 // Define associations
 
@@ -227,6 +228,14 @@ Notification.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Company.hasMany(Notification, { foreignKey: 'company_id', as: 'notifications' });
 Notification.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
 
+// User - Feedback (One-to-Many)
+User.hasMany(Feedback, { foreignKey: 'user_id', as: 'feedbacks' });
+Feedback.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
+// Company - Feedback (One-to-Many)
+Company.hasMany(Feedback, { foreignKey: 'company_id', as: 'feedbacks' });
+Feedback.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
 // Sync database
 const syncDatabase = async (options = {}) => {
   try {
@@ -266,5 +275,6 @@ module.exports = {
   EmailConfiguration,
   AnnouncementCategory,
   Notification,
+  Feedback,
   syncDatabase
 };

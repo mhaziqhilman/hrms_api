@@ -135,6 +135,16 @@ const login = async (req, res, next) => {
       });
     }
 
+    // Check if user is OAuth-only (no password set)
+    if (!user.password) {
+      const providerName = user.oauth_provider === 'google' ? 'Google' : user.oauth_provider === 'github' ? 'GitHub' : 'social';
+      return res.status(401).json({
+        success: false,
+        message: `This account uses ${providerName} sign-in. Please use the ${providerName} button to log in, or set a password in your account settings.`,
+        data: { oauth_provider: user.oauth_provider }
+      });
+    }
+
     // Verify password
     const isPasswordValid = await user.comparePassword(password);
 
@@ -329,7 +339,7 @@ const getCurrentUser = async (req, res, next) => {
           }]
         }
       ],
-      attributes: { exclude: ['password', 'email_verification_token', 'email_verification_expires'] }
+      attributes: { exclude: ['email_verification_token', 'email_verification_expires'] }
     });
 
     // For super_admin: override company_id from JWT viewing context (not persisted in DB)
@@ -373,6 +383,9 @@ const getCurrentUser = async (req, res, next) => {
       logger.info(`Auto-repaired company_id for user ${user.email} → company ${firstMembership.company_id}`);
     }
 
+    // Add computed field for frontend to know if user has a password (before toJSON strips it)
+    user.dataValues.has_password = !!user.password;
+
     res.json({
       success: true,
       data: user
@@ -400,6 +413,14 @@ const forgotPassword = async (req, res, next) => {
 
     // Don't reveal if email exists or not
     if (!user) {
+      return res.json({
+        success: true,
+        message: 'If the email exists, a password reset link has been sent.'
+      });
+    }
+
+    // OAuth-only users have no password to reset — return success to prevent enumeration
+    if (!user.password && user.oauth_provider) {
       return res.json({
         success: true,
         message: 'If the email exists, a password reset link has been sent.'
@@ -523,6 +544,17 @@ const changePassword = async (req, res, next) => {
       return res.status(404).json({
         success: false,
         message: 'User not found'
+      });
+    }
+
+    // OAuth-only user setting a password for the first time
+    if (!user.password) {
+      user.password = newPassword;
+      await user.save();
+      logger.info(`Password set for OAuth user: ${user.email}`);
+      return res.json({
+        success: true,
+        message: 'Password set successfully. You can now log in with email and password.'
       });
     }
 

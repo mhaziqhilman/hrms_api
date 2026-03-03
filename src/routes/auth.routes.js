@@ -1,6 +1,8 @@
 const express = require('express');
 const { body } = require('express-validator');
+const passport = require('passport');
 const authController = require('../controllers/authController');
+const { oauthCallback } = require('../controllers/oauthController');
 const { verifyToken } = require('../middleware/auth.middleware');
 const { validate } = require('../middleware/validation.middleware');
 
@@ -138,5 +140,51 @@ router.post(
  * @access  Private
  */
 router.post('/resend-verification', verifyToken, authController.resendVerification);
+
+// ==================== OAuth Routes ====================
+
+/**
+ * @route   GET /api/auth/google
+ * @desc    Initiate Google OAuth login
+ * @access  Public
+ */
+router.get('/google', (req, res, next) => {
+  passport.authenticate('google', {
+    scope: ['profile', 'email'],
+    session: false
+  })(req, res, next);
+});
+
+/**
+ * @route   GET /api/auth/google/callback
+ * @desc    Google OAuth callback
+ * @access  Public
+ */
+router.get('/google/callback',
+  passport.authenticate('google', { session: false, failureRedirect: '/auth/login?error=oauth_failed' }),
+  oauthCallback
+);
+
+/**
+ * @route   GET /api/auth/github
+ * @desc    Initiate GitHub OAuth login
+ * @access  Public
+ */
+router.get('/github', (req, res, next) => {
+  passport.authenticate('github', {
+    scope: ['user:email'],
+    session: false
+  })(req, res, next);
+});
+
+/**
+ * @route   GET /api/auth/github/callback
+ * @desc    GitHub OAuth callback
+ * @access  Public
+ */
+router.get('/github/callback',
+  passport.authenticate('github', { session: false, failureRedirect: '/auth/login?error=oauth_failed' }),
+  oauthCallback
+);
 
 module.exports = router;

@@ -18,7 +18,7 @@ const User = sequelize.define('User', {
   },
   password: {
     type: DataTypes.STRING(255),
-    allowNull: false
+    allowNull: true
   },
   role: {
     type: DataTypes.ENUM('super_admin', 'admin', 'manager', 'staff'),
@@ -79,6 +79,21 @@ const User = sequelize.define('User', {
     type: DataTypes.DATE,
     allowNull: true,
     field: 'reset_password_expires'
+  },
+  oauth_provider: {
+    type: DataTypes.STRING(20),
+    allowNull: true,
+    field: 'oauth_provider'
+  },
+  oauth_provider_id: {
+    type: DataTypes.STRING(255),
+    allowNull: true,
+    field: 'oauth_provider_id'
+  },
+  avatar_url: {
+    type: DataTypes.STRING(500),
+    allowNull: true,
+    field: 'avatar_url'
   }
 }, {
   tableName: 'users',
@@ -92,7 +107,7 @@ const User = sequelize.define('User', {
       }
     },
     beforeUpdate: async (user) => {
-      if (user.changed('password')) {
+      if (user.changed('password') && user.password) {
         user.password = await bcrypt.hash(user.password, 10);
       }
     }
@@ -101,6 +116,7 @@ const User = sequelize.define('User', {
 
 // Instance methods
 User.prototype.comparePassword = async function(candidatePassword) {
+  if (!this.password) return false;
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
@@ -134,6 +150,7 @@ User.prototype.toJSON = function() {
   const values = { ...this.get() };
   delete values.password;
   delete values.remember_token;
+  delete values.oauth_provider_id;
   return values;
 };
 

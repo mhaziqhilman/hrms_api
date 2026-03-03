@@ -5,6 +5,8 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
+const passport = require('passport');
+const { configurePassport } = require('./config/passport');
 
 const { testConnection, sequelize } = require('./config/database');
 const { errorHandler, notFound } = require('./middleware/error.middleware');
@@ -36,6 +38,7 @@ const emailConfigurationRoutes = require('./routes/emailConfiguration.routes');
 const leaveEntitlementRoutes = require('./routes/leaveEntitlement.routes');
 const announcementCategoryRoutes = require('./routes/announcementCategory.routes');
 const notificationRoutes = require('./routes/notification.routes');
+const feedbackRoutes = require('./routes/feedback.routes');
 
 // Initialize express app
 const app = express();
@@ -56,6 +59,10 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Compression middleware
 app.use(compression());
+
+// Passport OAuth initialization (stateless — no sessions)
+app.use(passport.initialize());
+configurePassport();
 
 // HTTP request logger
 if (process.env.NODE_ENV === 'development') {
@@ -127,6 +134,7 @@ app.use('/api/email-config', emailConfigurationRoutes);
 app.use('/api/leave-entitlements', leaveEntitlementRoutes);
 app.use('/api/announcement-categories', announcementCategoryRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/feedback', feedbackRoutes);
 
 // Placeholder routes for other modules (to be implemented)
 // app.use('/api/invoices', invoiceRoutes);
