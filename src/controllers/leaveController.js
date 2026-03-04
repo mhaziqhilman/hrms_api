@@ -2,6 +2,7 @@ const { Leave, Employee, LeaveType, LeaveEntitlement, User } = require('../model
 const notificationService = require('../services/notificationService');
 const { sendLeaveStatusNotification, shouldSendEmail } = require('../services/emailService');
 const logger = require('../utils/logger');
+const auditService = require('../services/auditService');
 const { Op } = require('sequelize');
 const { sequelize } = require('../config/database');
 
@@ -99,7 +100,8 @@ exports.getLeaveById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const leave = await Leave.findByPk(id, {
+    const leave = await Leave.findOne({
+      where: { public_id: id },
       include: [
         {
           model: Employee,
@@ -336,7 +338,8 @@ exports.updateLeave = async (req, res, next) => {
       attachment_url
     } = req.body;
 
-    const leave = await Leave.findByPk(id, {
+    const leave = await Leave.findOne({
+      where: { public_id: id },
       include: [
         {
           model: Employee,
@@ -436,7 +439,7 @@ exports.updateLeave = async (req, res, next) => {
     await transaction.commit();
 
     // Fetch updated leave
-    const updatedLeave = await Leave.findByPk(id, {
+    const updatedLeave = await Leave.findByPk(leave.id, {
       include: [
         {
           model: Employee,
@@ -475,7 +478,8 @@ exports.approveRejectLeave = async (req, res, next) => {
     const { id } = req.params;
     const { action, rejection_reason } = req.body; // action: 'approve' or 'reject'
 
-    const leave = await Leave.findByPk(id, {
+    const leave = await Leave.findOne({
+      where: { public_id: id },
       include: [
         {
           model: Employee,
@@ -578,6 +582,17 @@ exports.approveRejectLeave = async (req, res, next) => {
 
     await transaction.commit();
 
+    // Audit log
+    auditService.log({
+      userId: req.user.id,
+      companyId: req.user.company_id,
+      action: action === 'approve' ? 'leave.approved' : 'leave.rejected',
+      entityType: 'Leave',
+      entityId: leave.public_id || leave.id,
+      newValues: { status: action === 'approve' ? 'Approved' : 'Rejected', rejection_reason: rejection_reason || null },
+      req
+    });
+
     // Send notification to the leave applicant
     if (leave.employee && leave.employee.user_id) {
       const notifType = action === 'approve' ? 'leave_approved' : 'leave_rejected';
@@ -617,7 +632,7 @@ exports.approveRejectLeave = async (req, res, next) => {
     }
 
     // Fetch updated leave
-    const updatedLeave = await Leave.findByPk(id, {
+    const updatedLeave = await Leave.findByPk(leave.id, {
       include: [
         {
           model: Employee,
@@ -659,7 +674,7 @@ exports.cancelLeave = async (req, res, next) => {
     const { id } = req.params;
 
     const leave = await Leave.findOne({
-      where: { id },
+      where: { public_id: id },
       include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
     });
 

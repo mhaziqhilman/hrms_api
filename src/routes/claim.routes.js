@@ -29,7 +29,7 @@ const submitClaimValidation = [
 ];
 
 const updateClaimValidation = [
-  param('id').isInt().withMessage('Claim ID must be an integer'),
+  param('id').notEmpty().withMessage('ID is required'),
   body('claim_type_id').optional().isInt().withMessage('Claim type ID must be an integer'),
   body('date').optional().isISO8601().withMessage('Date must be a valid date'),
   body('amount').optional().isDecimal({ min: 0.01 }).withMessage('Amount must be a positive decimal'),
@@ -38,13 +38,13 @@ const updateClaimValidation = [
 ];
 
 const managerApprovalValidation = [
-  param('id').isInt().withMessage('Claim ID must be an integer'),
+  param('id').notEmpty().withMessage('ID is required'),
   body('action').isIn(['approve', 'reject']).withMessage('Action must be approve or reject'),
   body('rejection_reason').if(body('action').equals('reject')).notEmpty().withMessage('Rejection reason is required when rejecting')
 ];
 
 const financeApprovalValidation = [
-  param('id').isInt().withMessage('Claim ID must be an integer'),
+  param('id').notEmpty().withMessage('ID is required'),
   body('action').isIn(['approve', 'reject', 'paid']).withMessage('Action must be approve, reject, or paid'),
   body('rejection_reason').if(body('action').equals('reject')).notEmpty().withMessage('Rejection reason is required when rejecting'),
   body('payment_date').if(body('action').equals('paid')).optional().isISO8601().withMessage('Payment date must be a valid date'),
@@ -53,7 +53,7 @@ const financeApprovalValidation = [
 ];
 
 const idParamValidation = [
-  param('id').isInt().withMessage('ID must be an integer')
+  param('id').notEmpty().withMessage('ID is required')
 ];
 
 const employeeIdParamValidation = [

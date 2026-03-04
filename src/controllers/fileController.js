@@ -4,6 +4,8 @@ const supabaseStorage = require('../services/supabaseStorageService');
 const { generateFilename, getStoragePath } = require('../config/upload.config');
 const File = require('../models/File');
 const Employee = require('../models/Employee');
+const Claim = require('../models/Claim');
+const Leave = require('../models/Leave');
 
 // Upload file(s)
 exports.uploadFiles = async (req, res) => {
@@ -112,9 +114,34 @@ exports.getAllFiles = async (req, res) => {
 
     if (category) filters.category = category;
     if (uploaded_by) filters.uploaded_by = uploaded_by;
-    if (related_to_employee_id) filters.related_to_employee_id = related_to_employee_id;
-    if (related_to_claim_id) filters.related_to_claim_id = related_to_claim_id;
-    if (related_to_leave_id) filters.related_to_leave_id = related_to_leave_id;
+    if (related_to_employee_id) {
+      // If UUID (public_id), resolve to integer employee ID
+      if (isNaN(Number(related_to_employee_id))) {
+        const emp = await Employee.findOne({
+          where: { public_id: related_to_employee_id },
+          attributes: ['id']
+        });
+        if (emp) filters.related_to_employee_id = emp.id;
+      } else {
+        filters.related_to_employee_id = related_to_employee_id;
+      }
+    }
+    if (related_to_claim_id) {
+      if (isNaN(Number(related_to_claim_id))) {
+        const claim = await Claim.findOne({ where: { public_id: related_to_claim_id }, attributes: ['id'] });
+        if (claim) filters.related_to_claim_id = claim.id;
+      } else {
+        filters.related_to_claim_id = related_to_claim_id;
+      }
+    }
+    if (related_to_leave_id) {
+      if (isNaN(Number(related_to_leave_id))) {
+        const leave = await Leave.findOne({ where: { public_id: related_to_leave_id }, attributes: ['id'] });
+        if (leave) filters.related_to_leave_id = leave.id;
+      } else {
+        filters.related_to_leave_id = related_to_leave_id;
+      }
+    }
     if (search) filters.search = search;
     if (is_verified !== undefined && is_verified !== '') filters.is_verified = is_verified;
 

@@ -4,6 +4,7 @@ const User = require('../models/User');
 const { Op } = require('sequelize');
 const { sequelize } = require('../config/database');
 const logger = require('../utils/logger');
+const auditService = require('../services/auditService');
 
 /**
  * Get all employees with pagination and filtering
@@ -89,7 +90,7 @@ exports.getEmployeeById = async (req, res, next) => {
     const { id } = req.params;
 
     const employee = await Employee.findOne({
-      where: { id, company_id: req.user.company_id },
+      where: { public_id: id, company_id: req.user.company_id },
       include: [
         {
           model: Employee,
@@ -239,6 +240,16 @@ exports.createEmployee = async (req, res, next) => {
       created_by: req.user.id
     });
 
+    auditService.log({
+      userId: req.user.id,
+      companyId: req.user.company_id,
+      action: 'employee.created',
+      entityType: 'Employee',
+      entityId: employee.public_id || employee.id,
+      newValues: { employee_id: employee.employee_id, full_name: employee.full_name, position: employee.position, department: employee.department },
+      req
+    });
+
     res.status(201).json({
       success: true,
       message: 'Employee created successfully',
@@ -259,7 +270,7 @@ exports.updateEmployee = async (req, res, next) => {
     const updates = req.body;
 
     const employee = await Employee.findOne({
-      where: { id, company_id: req.user.company_id }
+      where: { public_id: id, company_id: req.user.company_id }
     });
 
     if (!employee) {
@@ -310,6 +321,16 @@ exports.updateEmployee = async (req, res, next) => {
       updates: Object.keys(updates)
     });
 
+    auditService.log({
+      userId: req.user.id,
+      companyId: req.user.company_id,
+      action: 'employee.updated',
+      entityType: 'Employee',
+      entityId: employee.public_id || employee.id,
+      newValues: { updated_fields: Object.keys(updates) },
+      req
+    });
+
     res.status(200).json({
       success: true,
       message: 'Employee updated successfully',
@@ -330,7 +351,7 @@ exports.deleteEmployee = async (req, res, next) => {
     const { status = 'Resigned', reason } = req.body;
 
     const employee = await Employee.findOne({
-      where: { id, company_id: req.user.company_id }
+      where: { public_id: id, company_id: req.user.company_id }
     });
 
     if (!employee) {
@@ -357,6 +378,17 @@ exports.deleteEmployee = async (req, res, next) => {
       changed_by: req.user.id
     });
 
+    auditService.log({
+      userId: req.user.id,
+      companyId: req.user.company_id,
+      action: 'employee.deactivated',
+      entityType: 'Employee',
+      entityId: employee.public_id || employee.id,
+      oldValues: { employment_status: 'Active' },
+      newValues: { employment_status: status, reason },
+      req
+    });
+
     res.status(200).json({
       success: true,
       message: `Employee ${status.toLowerCase()} successfully`,
@@ -377,7 +409,7 @@ exports.getEmployeeYTD = async (req, res, next) => {
     const { year = new Date().getFullYear() } = req.query;
 
     const employee = await Employee.findOne({
-      where: { id, company_id: req.user.company_id }
+      where: { public_id: id, company_id: req.user.company_id }
     });
 
     if (!employee) {
@@ -397,7 +429,7 @@ exports.getEmployeeYTD = async (req, res, next) => {
 
     const ytdRecords = await YTDStatutory.findAll({
       where: {
-        employee_id: id,
+        employee_id: employee.id,
         year: parseInt(year)
       },
       order: [['month', 'ASC']]

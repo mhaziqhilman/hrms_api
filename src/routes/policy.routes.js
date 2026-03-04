@@ -66,7 +66,7 @@ const createPolicyValidation = [
 ];
 
 const updatePolicyValidation = [
-  param('id').isInt().withMessage('Policy ID must be an integer'),
+  param('id').notEmpty().withMessage('ID is required'),
   body('policy_code')
     .optional()
     .notEmpty().withMessage('Policy code cannot be empty')
@@ -113,7 +113,7 @@ const updatePolicyValidation = [
 ];
 
 const idParamValidation = [
-  param('id').isInt().withMessage('ID must be an integer')
+  param('id').notEmpty().withMessage('ID is required')
 ];
 
 const queryValidation = [
@@ -141,7 +141,7 @@ const queryValidation = [
 ];
 
 const acknowledgeValidation = [
-  param('id').isInt().withMessage('Policy ID must be an integer'),
+  param('id').notEmpty().withMessage('ID is required'),
   body('comments')
     .optional()
     .isString().withMessage('Comments must be a string')

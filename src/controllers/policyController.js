@@ -190,7 +190,8 @@ exports.getPolicyById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const policy = await Policy.findByPk(id, {
+    const policy = await Policy.findOne({
+      where: { public_id: id },
       include: [
         {
           model: User,
@@ -253,7 +254,7 @@ exports.getPolicyById = async (req, res) => {
       if (employee) {
         await PolicyAcknowledgment.findOrCreate({
           where: {
-            policy_id: id,
+            policy_id: policy.id,
             employee_id: employee.id,
             policy_version: policy.version
           },
@@ -300,7 +301,7 @@ exports.updatePolicy = async (req, res) => {
       tags
     } = req.body;
 
-    const policy = await Policy.findByPk(id);
+    const policy = await Policy.findOne({ where: { public_id: id } });
 
     if (!policy) {
       return res.status(404).json({
@@ -345,7 +346,7 @@ exports.updatePolicy = async (req, res) => {
       tags
     });
 
-    const updatedPolicy = await Policy.findByPk(id, {
+    const updatedPolicy = await Policy.findByPk(policy.id, {
       include: [
         {
           model: User,
@@ -380,7 +381,7 @@ exports.deletePolicy = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const policy = await Policy.findByPk(id);
+    const policy = await Policy.findOne({ where: { public_id: id } });
 
     if (!policy) {
       return res.status(404).json({
@@ -418,7 +419,7 @@ exports.approvePolicy = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const policy = await Policy.findByPk(id);
+    const policy = await Policy.findOne({ where: { public_id: id } });
 
     if (!policy) {
       return res.status(404).json({
@@ -441,7 +442,7 @@ exports.approvePolicy = async (req, res) => {
       approved_at: new Date()
     });
 
-    const approvedPolicy = await Policy.findByPk(id, {
+    const approvedPolicy = await Policy.findByPk(policy.id, {
       include: [
         {
           model: User,
@@ -477,7 +478,7 @@ exports.acknowledgePolicy = async (req, res) => {
     const { id } = req.params;
     const { comments } = req.body;
 
-    const policy = await Policy.findByPk(id);
+    const policy = await Policy.findOne({ where: { public_id: id } });
 
     if (!policy) {
       return res.status(404).json({
@@ -508,7 +509,7 @@ exports.acknowledgePolicy = async (req, res) => {
     // Find acknowledgment record
     const acknowledgment = await PolicyAcknowledgment.findOne({
       where: {
-        policy_id: id,
+        policy_id: policy.id,
         employee_id: employee.id,
         policy_version: policy.version
       }
@@ -517,7 +518,7 @@ exports.acknowledgePolicy = async (req, res) => {
     if (!acknowledgment) {
       // Create new acknowledgment
       const newAcknowledgment = await PolicyAcknowledgment.create({
-        policy_id: id,
+        policy_id: policy.id,
         employee_id: employee.id,
         policy_version: policy.version,
         viewed_at: new Date(),
@@ -573,7 +574,8 @@ exports.getPolicyStatistics = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const policy = await Policy.findByPk(id, {
+    const policy = await Policy.findOne({
+      where: { public_id: id },
       include: [
         {
           model: PolicyAcknowledgment,

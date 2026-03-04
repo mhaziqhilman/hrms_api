@@ -64,7 +64,7 @@ const createMemoValidation = [
 ];
 
 const updateMemoValidation = [
-  param('id').isInt().withMessage('Memo ID must be an integer'),
+  param('id').notEmpty().withMessage('ID is required'),
   body('category_id')
     .optional()
     .isInt().withMessage('Category ID must be an integer'),
@@ -108,7 +108,7 @@ const updateMemoValidation = [
 ];
 
 const idParamValidation = [
-  param('id').isInt().withMessage('ID must be an integer')
+  param('id').notEmpty().withMessage('ID is required')
 ];
 
 const queryValidation = [

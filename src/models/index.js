@@ -26,6 +26,7 @@ const EmailConfiguration = require('./EmailConfiguration');
 const AnnouncementCategory = require('./AnnouncementCategory');
 const Notification = require('./Notification');
 const Feedback = require('./Feedback');
+const AuditLog = require('./AuditLog');
 
 // Define associations
 
@@ -236,6 +237,12 @@ Feedback.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Company.hasMany(Feedback, { foreignKey: 'company_id', as: 'feedbacks' });
 Feedback.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
 
+// AuditLog associations
+User.hasMany(AuditLog, { foreignKey: 'user_id', as: 'audit_logs' });
+AuditLog.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+Company.hasMany(AuditLog, { foreignKey: 'company_id', as: 'audit_logs' });
+AuditLog.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
 // Sync database
 const syncDatabase = async (options = {}) => {
   try {
@@ -276,5 +283,6 @@ module.exports = {
   AnnouncementCategory,
   Notification,
   Feedback,
+  AuditLog,
   syncDatabase
 };

@@ -95,6 +95,20 @@ router.post(
 router.post('/logout', verifyToken, authController.logout);
 
 /**
+ * @route   POST /api/auth/refresh-token
+ * @desc    Exchange a valid refresh token for a new access token
+ * @access  Public
+ */
+router.post(
+  '/refresh-token',
+  [
+    body('refreshToken').notEmpty().withMessage('Refresh token is required'),
+    validate
+  ],
+  authController.refreshToken
+);
+
+/**
  * @route   POST /api/auth/change-password
  * @desc    Change password (authenticated user)
  * @access  Private

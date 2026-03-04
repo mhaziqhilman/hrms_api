@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const jwtConfig = require('../config/jwt');
 const { User, Employee } = require('../models');
+const tokenBlacklist = require('../utils/tokenBlacklist');
 
 /**
  * Verify JWT token and attach user to request
@@ -18,6 +19,14 @@ const verifyToken = async (req, res, next) => {
     }
 
     const token = authHeader.split(' ')[1];
+
+    // Check if token has been blacklisted (logged out)
+    if (tokenBlacklist.has(token)) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token has been revoked. Please login again.'
+      });
+    }
 
     // Verify token
     const decoded = jwt.verify(token, jwtConfig.secret, {

@@ -35,7 +35,7 @@ const clockOutValidation = [
 ];
 
 const updateAttendanceValidation = [
-  param('id').isInt().withMessage('Attendance ID must be an integer'),
+  param('id').notEmpty().withMessage('ID is required'),
   body('clock_in_time').optional().isISO8601().withMessage('Clock in time must be a valid datetime'),
   body('clock_out_time').optional().isISO8601().withMessage('Clock out time must be a valid datetime'),
   body('type').optional().isIn(['Office', 'WFH']).withMessage('Type must be Office or WFH'),
@@ -49,13 +49,13 @@ const applyWFHValidation = [
 ];
 
 const approveRejectWFHValidation = [
-  param('id').isInt().withMessage('WFH application ID must be an integer'),
+  param('id').notEmpty().withMessage('ID is required'),
   body('action').isIn(['approve', 'reject']).withMessage('Action must be approve or reject'),
   body('rejection_reason').optional().notEmpty().withMessage('Rejection reason cannot be empty')
 ];
 
 const idParamValidation = [
-  param('id').isInt().withMessage('ID must be an integer')
+  param('id').notEmpty().withMessage('ID is required')
 ];
 
 const employeeIdParamValidation = [

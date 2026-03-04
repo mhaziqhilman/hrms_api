@@ -7,9 +7,10 @@ const { sendPasswordResetEmail, sendWelcomeEmail, sendVerificationEmail } = requ
 const { generateRandomString } = require('../utils/helpers');
 const { linkEmployeeToUser } = require('../services/invitationService');
 const logger = require('../utils/logger');
+const tokenBlacklist = require('../utils/tokenBlacklist');
 
 /**
- * Generate JWT token
+ * Generate JWT access token (short-lived)
  */
 const generateToken = (user) => {
   return jwt.sign(
@@ -28,6 +29,16 @@ const generateToken = (user) => {
       audience: jwtConfig.options.audience
     }
   );
+};
+
+/**
+ * Generate and persist a refresh token for a user (7-day, one-time use)
+ */
+const generateAndSaveRefreshToken = async (user) => {
+  const refreshToken = crypto.randomBytes(48).toString('hex');
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+  await user.update({ refresh_token: refreshToken, refresh_token_expires_at: expiresAt });
+  return refreshToken;
 };
 
 /**
@@ -272,8 +283,9 @@ const login = async (req, res, next) => {
       }
     }
 
-    // Generate token
+    // Generate tokens
     const token = generateToken(user);
+    const refreshToken = await generateAndSaveRefreshToken(user);
 
     // Fetch company memberships
     const companyMemberships = await UserCompany.findAll({
@@ -293,6 +305,7 @@ const login = async (req, res, next) => {
       message: 'Login successful',
       data: {
         token,
+        refreshToken,
         user: {
           id: user.id,
           email: user.email,
@@ -507,14 +520,72 @@ const resetPassword = async (req, res, next) => {
  */
 const logout = async (req, res, next) => {
   try {
-    // In stateless JWT, logout is handled client-side by removing token
-    // Can implement token blacklist here if needed
+    // Blacklist the current token so it cannot be reused after logout
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      tokenBlacklist.add(token);
+    }
 
     logger.info(`User logged out: ${req.user.email}`);
 
     res.json({
       success: true,
       message: 'Logout successful'
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Refresh access token using a valid refresh token
+ */
+const refreshToken = async (req, res, next) => {
+  try {
+    const { refreshToken: token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: 'Refresh token is required'
+      });
+    }
+
+    // Find user by refresh token
+    const user = await User.findOne({
+      where: { refresh_token: token }
+    });
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid refresh token'
+      });
+    }
+
+    // Check expiry
+    if (!user.refresh_token_expires_at || new Date() > new Date(user.refresh_token_expires_at)) {
+      // Clear expired token
+      await user.update({ refresh_token: null, refresh_token_expires_at: null });
+      return res.status(401).json({
+        success: false,
+        message: 'Refresh token expired. Please login again.'
+      });
+    }
+
+    // Rotate: generate new access token and new refresh token (one-time use)
+    const newAccessToken = generateToken(user);
+    const newRefreshToken = await generateAndSaveRefreshToken(user);
+
+    logger.info(`Token refreshed for user: ${user.email}`);
+
+    res.json({
+      success: true,
+      data: {
+        token: newAccessToken,
+        refreshToken: newRefreshToken
+      }
     });
   } catch (error) {
     next(error);
@@ -750,6 +821,7 @@ module.exports = {
   forgotPassword,
   resetPassword,
   logout,
+  refreshToken,
   changePassword,
   verifyEmail,
   resendVerification

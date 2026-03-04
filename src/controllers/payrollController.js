@@ -9,6 +9,7 @@ const logger = require('../utils/logger');
 const { calculateAllStatutory, getCompanyRates } = require('../utils/statutoryCalculations');
 const { sendPayslipNotification, shouldSendEmail } = require('../services/emailService');
 const storageService = require('../services/supabaseStorageService');
+const auditService = require('../services/auditService');
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -102,7 +103,8 @@ exports.getPayrollById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const payroll = await Payroll.findByPk(id, {
+    const payroll = await Payroll.findOne({
+      where: { public_id: id },
       include: [
         {
           model: Employee,
@@ -319,7 +321,7 @@ exports.updatePayroll = async (req, res, next) => {
     const updates = req.body;
 
     const payroll = await Payroll.findOne({
-      where: { id },
+      where: { public_id: id },
       include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
     });
 
@@ -437,7 +439,7 @@ exports.submitForApproval = async (req, res, next) => {
     const { id } = req.params;
 
     const payroll = await Payroll.findOne({
-      where: { id },
+      where: { public_id: id },
       include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
     });
 
@@ -482,7 +484,7 @@ exports.approvePayroll = async (req, res, next) => {
     const { id } = req.params;
 
     const payroll = await Payroll.findOne({
-      where: { id },
+      where: { public_id: id },
       include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
     });
 
@@ -508,6 +510,16 @@ exports.approvePayroll = async (req, res, next) => {
 
     logger.info(`Payroll ${id} approved by user ${req.user.id}`);
 
+    auditService.log({
+      userId: req.user.id,
+      companyId: req.user.company_id,
+      action: 'payroll.approved',
+      entityType: 'Payroll',
+      entityId: payroll.public_id || payroll.id,
+      newValues: { status: 'Approved', approved_by: req.user.id },
+      req
+    });
+
     res.status(200).json({
       success: true,
       message: 'Payroll approved successfully',
@@ -527,7 +539,7 @@ exports.markAsPaid = async (req, res, next) => {
     const { id } = req.params;
 
     const payroll = await Payroll.findOne({
-      where: { id },
+      where: { public_id: id },
       include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: ['id', 'full_name', 'user_id'] }]
     });
 
@@ -548,6 +560,16 @@ exports.markAsPaid = async (req, res, next) => {
     await payroll.update({ status: 'Paid' });
 
     logger.info(`Payroll ${id} marked as paid by user ${req.user.id}`);
+
+    auditService.log({
+      userId: req.user.id,
+      companyId: req.user.company_id,
+      action: 'payroll.paid',
+      entityType: 'Payroll',
+      entityId: payroll.public_id || payroll.id,
+      newValues: { status: 'Paid' },
+      req
+    });
 
     // Send payslip notification email
     if (payroll.employee?.user_id) {
@@ -591,7 +613,7 @@ exports.deletePayroll = async (req, res, next) => {
     const { id } = req.params;
 
     const payroll = await Payroll.findOne({
-      where: { id },
+      where: { public_id: id },
       include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
     });
 
@@ -631,7 +653,7 @@ exports.permanentDeletePayroll = async (req, res, next) => {
     const { id } = req.params;
 
     const payroll = await Payroll.findOne({
-      where: { id },
+      where: { public_id: id },
       include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
     });
 
@@ -670,7 +692,8 @@ exports.generatePayslip = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const payroll = await Payroll.findByPk(id, {
+    const payroll = await Payroll.findOne({
+      where: { public_id: id },
       include: [
         {
           model: Employee,
@@ -825,7 +848,8 @@ exports.downloadPayslipPdf = async (req, res, next) => {
     const { id } = req.params;
     const { generatePayslipPDF } = require('../services/payslipPdfService');
 
-    const payroll = await Payroll.findByPk(id, {
+    const payroll = await Payroll.findOne({
+      where: { public_id: id },
       include: [{
         model: Employee,
         as: 'employee',
@@ -940,7 +964,8 @@ exports.sendPayslipEmail = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'PDF attachment is required' });
     }
 
-    const payroll = await Payroll.findByPk(id, {
+    const payroll = await Payroll.findOne({
+      where: { public_id: id },
       include: [
         {
           model: Employee,

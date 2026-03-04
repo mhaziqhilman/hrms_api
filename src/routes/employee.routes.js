@@ -157,7 +157,7 @@ router.get(
   '/:id/ytd',
   verifyToken,
   [
-    param('id').isInt({ min: 1 }).withMessage('Employee ID must be a positive integer'),
+    param('id').notEmpty().withMessage('ID is required'),
     query('year').optional().isInt({ min: 2000, max: 2100 }).withMessage('Invalid year'),
     validate
   ],
@@ -173,7 +173,7 @@ router.get(
   '/:id',
   verifyToken,
   [
-    param('id').isInt({ min: 1 }).withMessage('Employee ID must be a positive integer'),
+    param('id').notEmpty().withMessage('ID is required'),
     validate
   ],
   employeeController.getEmployeeById
@@ -202,7 +202,7 @@ router.put(
   verifyToken,
   requireAdmin,
   [
-    param('id').isInt({ min: 1 }).withMessage('Employee ID must be a positive integer'),
+    param('id').notEmpty().withMessage('ID is required'),
     ...updateEmployeeValidation,
     validate
   ],
@@ -219,7 +219,7 @@ router.delete(
   verifyToken,
   requireAdmin,
   [
-    param('id').isInt({ min: 1 }).withMessage('Employee ID must be a positive integer'),
+    param('id').notEmpty().withMessage('ID is required'),
     ...deleteEmployeeValidation,
     validate
   ],

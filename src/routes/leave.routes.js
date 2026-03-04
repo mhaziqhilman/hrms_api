@@ -31,7 +31,7 @@ const applyLeaveValidation = [
 ];
 
 const updateLeaveValidation = [
-  param('id').isInt().withMessage('Leave ID must be an integer'),
+  param('id').notEmpty().withMessage('ID is required'),
   body('start_date').optional().isISO8601().withMessage('Start date must be a valid date'),
   body('end_date').optional().isISO8601().withMessage('End date must be a valid date'),
   body('is_half_day').optional().isBoolean().withMessage('is_half_day must be a boolean'),
@@ -41,13 +41,13 @@ const updateLeaveValidation = [
 ];
 
 const approveRejectValidation = [
-  param('id').isInt().withMessage('Leave ID must be an integer'),
+  param('id').notEmpty().withMessage('ID is required'),
   body('action').isIn(['approve', 'reject']).withMessage('Action must be approve or reject'),
   body('rejection_reason').optional().notEmpty().withMessage('Rejection reason cannot be empty')
 ];
 
 const idParamValidation = [
-  param('id').isInt().withMessage('ID must be an integer')
+  param('id').notEmpty().withMessage('ID is required')
 ];
 
 const queryValidation = [

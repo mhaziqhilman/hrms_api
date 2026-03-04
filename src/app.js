@@ -39,12 +39,55 @@ const leaveEntitlementRoutes = require('./routes/leaveEntitlement.routes');
 const announcementCategoryRoutes = require('./routes/announcementCategory.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const feedbackRoutes = require('./routes/feedback.routes');
+const auditLogRoutes = require('./routes/auditLog.routes');
 
 // Initialize express app
 const app = express();
 
-// Security middleware
-app.use(helmet());
+// HTTPS enforcement (production only — Azure sets x-forwarded-proto)
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    if (req.headers['x-forwarded-proto'] !== 'https') {
+      return res.redirect(301, 'https://' + req.headers.host + req.url);
+    }
+    next();
+  });
+}
+
+// Security middleware — enhanced Helmet config
+const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
+const supabaseUrl = process.env.SUPABASE_URL || '';
+
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+      connectSrc: ["'self'", frontendUrl, supabaseUrl].filter(Boolean),
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      frameSrc: ["'none'"],
+      upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null
+    }
+  },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  },
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  crossOriginEmbedderPolicy: true,
+  crossOriginOpenerPolicy: { policy: 'same-origin' },
+  crossOriginResourcePolicy: { policy: 'same-origin' }
+}));
+
+// Permissions-Policy header (not included in Helmet by default)
+app.use((req, res, next) => {
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
 
 // CORS configuration
 app.use(cors({
@@ -135,6 +178,7 @@ app.use('/api/leave-entitlements', leaveEntitlementRoutes);
 app.use('/api/announcement-categories', announcementCategoryRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/feedback', feedbackRoutes);
+app.use('/api/audit-logs', auditLogRoutes);
 
 // Placeholder routes for other modules (to be implemented)
 // app.use('/api/invoices', invoiceRoutes);

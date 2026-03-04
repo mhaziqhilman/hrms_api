@@ -7,6 +7,12 @@ const Policy = sequelize.define('Policy', {
     primaryKey: true,
     autoIncrement: true
   },
+  public_id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    allowNull: true,
+    unique: true
+  },
   policy_code: {
     type: DataTypes.STRING(50),
     allowNull: false,

@@ -7,6 +7,12 @@ const Leave = sequelize.define('Leave', {
     primaryKey: true,
     autoIncrement: true
   },
+  public_id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    allowNull: true,
+    unique: true
+  },
   employee_id: {
     type: DataTypes.INTEGER,
     allowNull: false,

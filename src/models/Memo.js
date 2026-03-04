@@ -7,6 +7,12 @@ const Memo = sequelize.define('Memo', {
     primaryKey: true,
     autoIncrement: true
   },
+  public_id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    allowNull: true,
+    unique: true
+  },
   title: {
     type: DataTypes.STRING(200),
     allowNull: false

@@ -37,7 +37,7 @@ const calculatePayrollValidation = [
 ];
 
 const updatePayrollValidation = [
-  param('id').isInt().withMessage('Payroll ID must be an integer'),
+  param('id').notEmpty().withMessage('ID is required'),
   body('allowances').optional().isFloat({ min: 0 }).withMessage('Allowances must be a positive number'),
   body('overtime_pay').optional().isFloat({ min: 0 }).withMessage('Overtime pay must be a positive number'),
   body('bonus').optional().isFloat({ min: 0 }).withMessage('Bonus must be a positive number'),
@@ -50,7 +50,7 @@ const updatePayrollValidation = [
 ];
 
 const idParamValidation = [
-  param('id').isInt().withMessage('ID must be an integer')
+  param('id').notEmpty().withMessage('ID is required')
 ];
 
 const queryValidation = [

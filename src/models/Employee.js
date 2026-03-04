@@ -7,6 +7,12 @@ const Employee = sequelize.define('Employee', {
     primaryKey: true,
     autoIncrement: true
   },
+  public_id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    allowNull: true,
+    unique: true
+  },
   user_id: {
     type: DataTypes.INTEGER,
     allowNull: true,

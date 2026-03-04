@@ -366,7 +366,7 @@ exports.togglePin = async (req, res) => {
     const { id } = req.params;
     const company_id = req.user.company_id;
 
-    const memo = await Memo.findOne({ where: { id, company_id } });
+    const memo = await Memo.findOne({ where: { public_id: id, company_id } });
 
     if (!memo) {
       return res.status(404).json({ success: false, message: 'Announcement not found' });
@@ -378,7 +378,7 @@ exports.togglePin = async (req, res) => {
       pinned_at: newPinned ? new Date() : null
     });
 
-    const updatedMemo = await Memo.findByPk(id, {
+    const updatedMemo = await Memo.findByPk(memo.id, {
       include: getStandardIncludes(company_id)
     });
 
@@ -403,7 +403,7 @@ exports.getMemoById = async (req, res) => {
     const company_id = req.user.company_id;
 
     const memo = await Memo.findOne({
-      where: { id, company_id },
+      where: { public_id: id, company_id },
       include: [
         ...getStandardIncludes(company_id),
         {
@@ -466,7 +466,7 @@ exports.getMemoById = async (req, res) => {
     if (req.user.employee_id) {
       const [receipt, created] = await MemoReadReceipt.findOrCreate({
         where: {
-          memo_id: id,
+          memo_id: memo.id,
           employee_id: req.user.employee_id
         },
         defaults: {
@@ -518,7 +518,7 @@ exports.updateMemo = async (req, res) => {
       requires_acknowledgment
     } = req.body;
 
-    const memo = await Memo.findOne({ where: { id, company_id } });
+    const memo = await Memo.findOne({ where: { public_id: id, company_id } });
 
     if (!memo) {
       return res.status(404).json({
@@ -590,7 +590,7 @@ exports.updateMemo = async (req, res) => {
       }
     }
 
-    const updatedMemo = await Memo.findByPk(id, {
+    const updatedMemo = await Memo.findByPk(memo.id, {
       include: getStandardIncludes(company_id)
     });
 
@@ -618,7 +618,7 @@ exports.deleteMemo = async (req, res) => {
     const { id } = req.params;
     const company_id = req.user.company_id;
 
-    const memo = await Memo.findOne({ where: { id, company_id } });
+    const memo = await Memo.findOne({ where: { public_id: id, company_id } });
 
     if (!memo) {
       return res.status(404).json({
@@ -657,7 +657,7 @@ exports.acknowledgeMemo = async (req, res) => {
     const { id } = req.params;
     const company_id = req.user.company_id;
 
-    const memo = await Memo.findOne({ where: { id, company_id } });
+    const memo = await Memo.findOne({ where: { public_id: id, company_id } });
 
     if (!memo) {
       return res.status(404).json({
@@ -686,7 +686,7 @@ exports.acknowledgeMemo = async (req, res) => {
 
     const [receipt, created] = await MemoReadReceipt.findOrCreate({
       where: {
-        memo_id: id,
+        memo_id: memo.id,
         employee_id: employee.id
       },
       defaults: {
@@ -727,7 +727,7 @@ exports.getMemoStatistics = async (req, res) => {
     const company_id = req.user.company_id;
 
     const memo = await Memo.findOne({
-      where: { id, company_id },
+      where: { public_id: id, company_id },
       include: [
         {
           model: MemoReadReceipt,

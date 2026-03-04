@@ -80,6 +80,16 @@ const User = sequelize.define('User', {
     allowNull: true,
     field: 'reset_password_expires'
   },
+  refresh_token: {
+    type: DataTypes.STRING(512),
+    allowNull: true,
+    field: 'refresh_token'
+  },
+  refresh_token_expires_at: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    field: 'refresh_token_expires_at'
+  },
   oauth_provider: {
     type: DataTypes.STRING(20),
     allowNull: true,
@@ -151,6 +161,7 @@ User.prototype.toJSON = function() {
   delete values.password;
   delete values.remember_token;
   delete values.oauth_provider_id;
+  delete values.refresh_token;
   return values;
 };
 

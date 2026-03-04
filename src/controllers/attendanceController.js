@@ -4,6 +4,24 @@ const logger = require('../utils/logger');
 const { Op } = require('sequelize');
 const { sequelize } = require('../config/database');
 
+// Timezone config - Malaysia (UTC+8)
+const APP_TIMEZONE = 'Asia/Kuala_Lumpur';
+
+/**
+ * Get current date string (YYYY-MM-DD) in the app timezone
+ */
+function getTodayDate() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: APP_TIMEZONE });
+}
+
+/**
+ * Get current time as a Date object with timezone-aware hour/minute for comparisons
+ */
+function getNowInTimezone() {
+  const nowStr = new Date().toLocaleString('en-US', { timeZone: APP_TIMEZONE });
+  return new Date(nowStr);
+}
+
 /**
  * Clock in
  */
@@ -36,7 +54,7 @@ exports.clockIn = async (req, res, next) => {
       });
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = getTodayDate();
 
     // Check if already clocked in today
     const existingAttendance = await Attendance.findOne({
@@ -74,15 +92,16 @@ exports.clockIn = async (req, res, next) => {
 
     const clockInTime = new Date();
 
-    // Check if late (assuming office hours start at 9:00 AM)
-    const officeStartTime = new Date(clockInTime);
+    // Check if late (assuming office hours start at 9:00 AM) — use local timezone
+    const localNow = getNowInTimezone();
+    const officeStartTime = new Date(localNow);
     officeStartTime.setHours(9, 0, 0, 0);
-    const is_late = type === 'Office' && clockInTime > officeStartTime;
+    const is_late = type === 'Office' && localNow > officeStartTime;
 
     // Calculate late minutes if late
     let late_minutes = null;
     if (is_late) {
-      late_minutes = Math.floor((clockInTime - officeStartTime) / (1000 * 60));
+      late_minutes = Math.floor((localNow - officeStartTime) / (1000 * 60));
     }
 
     // Create or update attendance record
@@ -139,7 +158,7 @@ exports.clockOut = async (req, res, next) => {
       });
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = getTodayDate();
 
     // Find today's attendance record
     const attendance = await Attendance.findOne({
@@ -170,15 +189,16 @@ exports.clockOut = async (req, res, next) => {
     const clockInTime = new Date(attendance.clock_in_time);
     const totalHours = ((clockOutTime - clockInTime) / (1000 * 60 * 60)).toFixed(2);
 
-    // Check if early leave (assuming office hours end at 6:00 PM)
-    const officeEndTime = new Date(clockOutTime);
+    // Check if early leave (assuming office hours end at 6:00 PM) — use local timezone
+    const localNow = getNowInTimezone();
+    const officeEndTime = new Date(localNow);
     officeEndTime.setHours(18, 0, 0, 0);
-    const is_early_leave = attendance.type === 'Office' && clockOutTime < officeEndTime;
+    const is_early_leave = attendance.type === 'Office' && localNow < officeEndTime;
 
     // Calculate early leave minutes if early leave
     let early_leave_minutes = null;
     if (is_early_leave) {
-      early_leave_minutes = Math.floor((officeEndTime - clockOutTime) / (1000 * 60));
+      early_leave_minutes = Math.floor((officeEndTime - localNow) / (1000 * 60));
     }
 
     // Update attendance record
@@ -295,7 +315,8 @@ exports.getAttendanceById = async (req, res, next) => {
   try {
     const { id } = req.params;
 
-    const attendance = await Attendance.findByPk(id, {
+    const attendance = await Attendance.findOne({
+      where: { public_id: id },
       include: [
         {
           model: Employee,
@@ -348,7 +369,7 @@ exports.updateAttendance = async (req, res, next) => {
     } = req.body;
 
     const attendance = await Attendance.findOne({
-      where: { id },
+      where: { public_id: id },
       include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
     });
 
@@ -400,7 +421,7 @@ exports.deleteAttendance = async (req, res, next) => {
     const { id } = req.params;
 
     const attendance = await Attendance.findOne({
-      where: { id },
+      where: { public_id: id },
       include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
     });
 
@@ -596,7 +617,7 @@ exports.approveRejectWFH = async (req, res, next) => {
     const { action, rejection_reason } = req.body; // action: 'approve' or 'reject'
 
     const wfhApplication = await WFHApplication.findOne({
-      where: { id },
+      where: { public_id: id },
       include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
     });
 
@@ -674,7 +695,7 @@ exports.approveRejectWFH = async (req, res, next) => {
     }
 
     // Fetch updated WFH application
-    const updatedWFH = await WFHApplication.findByPk(id, {
+    const updatedWFH = await WFHApplication.findByPk(wfhApplication.id, {
       include: [
         {
           model: Employee,
@@ -728,9 +749,9 @@ exports.getAttendanceSummary = async (req, res, next) => {
       });
     }
 
-    const currentDate = new Date();
-    const targetYear = year || currentDate.getFullYear();
-    const targetMonth = month || (currentDate.getMonth() + 1);
+    const localNow = getNowInTimezone();
+    const targetYear = year || localNow.getFullYear();
+    const targetMonth = month || (localNow.getMonth() + 1);
 
     // Get first and last day of the month
     const startDate = new Date(targetYear, targetMonth - 1, 1);

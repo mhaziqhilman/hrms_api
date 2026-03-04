@@ -6,6 +6,7 @@ const { Op } = require('sequelize');
 const notificationService = require('../services/notificationService');
 const { sendClaimStatusNotification, shouldSendEmail } = require('../services/emailService');
 const logger = require('../utils/logger');
+const auditService = require('../services/auditService');
 
 // Submit a new claim
 exports.submitClaim = async (req, res) => {
@@ -183,7 +184,8 @@ exports.getClaimById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const claim = await Claim.findByPk(id, {
+    const claim = await Claim.findOne({
+      where: { public_id: id },
       include: [
         {
           model: Employee,
@@ -249,7 +251,7 @@ exports.updateClaim = async (req, res) => {
     const { claim_type_id, date, amount, description, receipt_url } = req.body;
 
     const claim = await Claim.findOne({
-      where: { id },
+      where: { public_id: id },
       include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
     });
     if (!claim) {
@@ -325,7 +327,7 @@ exports.managerApproval = async (req, res) => {
     const { action, rejection_reason } = req.body; // action: 'approve' or 'reject'
 
     const claim = await Claim.findOne({
-      where: { id },
+      where: { public_id: id },
       include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
     });
     if (!claim) {
@@ -430,6 +432,16 @@ exports.managerApproval = async (req, res) => {
       ]
     });
 
+    auditService.log({
+      userId: req.user.id,
+      companyId: req.user.company_id,
+      action: action === 'approve' ? 'claim.manager_approved' : 'claim.manager_rejected',
+      entityType: 'Claim',
+      entityId: claim.public_id || claim.id,
+      newValues: { status: action === 'approve' ? 'Manager_Approved' : 'Rejected', rejection_reason: rejection_reason || null },
+      req
+    });
+
     res.json({
       success: true,
       message: `Claim ${action === 'approve' ? 'approved' : 'rejected'} by manager successfully`,
@@ -453,7 +465,7 @@ exports.financeApproval = async (req, res) => {
     // action: 'approve', 'reject', or 'paid'
 
     const claim = await Claim.findOne({
-      where: { id },
+      where: { public_id: id },
       include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
     });
     if (!claim) {
@@ -592,6 +604,16 @@ exports.financeApproval = async (req, res) => {
       ]
     });
 
+    auditService.log({
+      userId: req.user.id,
+      companyId: req.user.company_id,
+      action: action === 'approve' ? 'claim.finance_approved' : action === 'reject' ? 'claim.finance_rejected' : 'claim.paid',
+      entityType: 'Claim',
+      entityId: claim.public_id || claim.id,
+      newValues: { action, rejection_reason: rejection_reason || null, payment_reference: payment_reference || null },
+      req
+    });
+
     res.json({
       success: true,
       message: `Claim ${action === 'approve' ? 'approved by finance' : action === 'reject' ? 'rejected by finance' : 'marked as paid'} successfully`,
@@ -613,7 +635,7 @@ exports.deleteClaim = async (req, res) => {
     const { id } = req.params;
 
     const claim = await Claim.findOne({
-      where: { id },
+      where: { public_id: id },
       include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
     });
     if (!claim) {
