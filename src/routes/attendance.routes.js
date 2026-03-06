@@ -65,7 +65,7 @@ const employeeIdParamValidation = [
 const queryValidation = [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
-  query('employee_id').optional().isInt().withMessage('Employee ID must be an integer'),
+  query('employee_id').optional().isUUID().withMessage('Employee ID must be a valid UUID'),
   query('type').optional().isIn(['Office', 'WFH']).withMessage('Type must be Office or WFH'),
   query('start_date').optional().isISO8601().withMessage('Start date must be a valid date'),
   query('end_date').optional().isISO8601().withMessage('End date must be a valid date'),
@@ -77,13 +77,13 @@ const wfhQueryValidation = [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
   query('status').optional().isIn(['Pending', 'Approved', 'Rejected']).withMessage('Invalid status'),
-  query('employee_id').optional().isInt().withMessage('Employee ID must be an integer'),
+  query('employee_id').optional().isUUID().withMessage('Employee ID must be a valid UUID'),
   query('start_date').optional().isISO8601().withMessage('Start date must be a valid date'),
   query('end_date').optional().isISO8601().withMessage('End date must be a valid date')
 ];
 
 const summaryQueryValidation = [
-  param('employee_id').isInt().withMessage('Employee ID must be an integer'),
+  param('employee_id').isUUID().withMessage('Employee ID must be a valid UUID'),
   query('month').optional().isInt({ min: 1, max: 12 }).withMessage('Month must be between 1 and 12'),
   query('year').optional().isInt({ min: 2020, max: 2100 }).withMessage('Invalid year')
 ];
