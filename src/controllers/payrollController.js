@@ -161,6 +161,9 @@ exports.calculatePayroll = async (req, res, next) => {
       commission = 0,
       unpaid_leave_deduction = 0,
       other_deductions = 0,
+      prior_ytd_gross = 0,
+      prior_ytd_epf = 0,
+      prior_ytd_pcb = 0,
       payment_date,
       notes
     } = req.body;
@@ -218,13 +221,21 @@ exports.calculatePayroll = async (req, res, next) => {
         month: { [Op.lt]: month },
         status: { [Op.notIn]: ['Cancelled'] }
       },
-      attributes: ['gross_salary', 'epf_employee', 'pcb_deduction'],
+      attributes: ['gross_salary', 'epf_employee', 'pcb_deduction', 'prior_ytd_gross', 'prior_ytd_epf', 'prior_ytd_pcb'],
       raw: true
     });
 
     const ytdGross = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.gross_salary || 0), 0);
     const ytdEpf = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.epf_employee || 0), 0);
     const ytdPcbDeducted = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.pcb_deduction || 0), 0);
+
+    // Prior employment YTD: use max from previous payrolls or current form values
+    const prevPriorGross = Math.max(0, ...previousPayrolls.map(p => parseFloat(p.prior_ytd_gross || 0)));
+    const prevPriorEpf = Math.max(0, ...previousPayrolls.map(p => parseFloat(p.prior_ytd_epf || 0)));
+    const prevPriorPcb = Math.max(0, ...previousPayrolls.map(p => parseFloat(p.prior_ytd_pcb || 0)));
+    const effectivePriorGross = Math.max(prevPriorGross, parseFloat(prior_ytd_gross || 0));
+    const effectivePriorEpf = Math.max(prevPriorEpf, parseFloat(prior_ytd_epf || 0));
+    const effectivePriorPcb = Math.max(prevPriorPcb, parseFloat(prior_ytd_pcb || 0));
 
     // Fetch company-specific statutory rates from DB
     const rateOverrides = await getCompanyRates(req.user.company_id);
@@ -241,9 +252,9 @@ exports.calculatePayroll = async (req, res, next) => {
         disabled_spouse: employee.disabled_spouse || false
       },
       ytd: {
-        gross: ytdGross,
-        epf: ytdEpf,
-        pcbDeducted: ytdPcbDeducted,
+        gross: ytdGross + effectivePriorGross,
+        epf: ytdEpf + effectivePriorEpf,
+        pcbDeducted: ytdPcbDeducted + effectivePriorPcb,
         zakat: 0
       },
       currentMonth: month,
@@ -281,6 +292,9 @@ exports.calculatePayroll = async (req, res, next) => {
       pcb_deduction: statutory.pcb,
       unpaid_leave_deduction,
       other_deductions,
+      prior_ytd_gross: parseFloat(prior_ytd_gross || 0),
+      prior_ytd_epf: parseFloat(prior_ytd_epf || 0),
+      prior_ytd_pcb: parseFloat(prior_ytd_pcb || 0),
       total_deductions,
       net_salary,
       status: 'Draft',
@@ -342,10 +356,11 @@ exports.updatePayroll = async (req, res, next) => {
       });
     }
 
-    // Recalculate if salary components changed
+    // Recalculate if salary components or prior YTD changed
     if (updates.allowances !== undefined || updates.overtime_pay !== undefined ||
         updates.bonus !== undefined || updates.commission !== undefined ||
-        updates.unpaid_leave_deduction !== undefined || updates.other_deductions !== undefined) {
+        updates.unpaid_leave_deduction !== undefined || updates.other_deductions !== undefined ||
+        updates.prior_ytd_gross !== undefined || updates.prior_ytd_epf !== undefined || updates.prior_ytd_pcb !== undefined) {
 
       const basic_salary = updates.basic_salary || payroll.basic_salary;
       const currentBonus = parseFloat(updates.bonus ?? payroll.bonus);
@@ -367,13 +382,21 @@ exports.updatePayroll = async (req, res, next) => {
           month: { [Op.lt]: payroll.month },
           status: { [Op.notIn]: ['Cancelled'] }
         },
-        attributes: ['gross_salary', 'epf_employee', 'pcb_deduction'],
+        attributes: ['gross_salary', 'epf_employee', 'pcb_deduction', 'prior_ytd_gross', 'prior_ytd_epf', 'prior_ytd_pcb'],
         raw: true
       });
 
       const ytdGross = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.gross_salary || 0), 0);
       const ytdEpf = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.epf_employee || 0), 0);
       const ytdPcbDeducted = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.pcb_deduction || 0), 0);
+
+      // Prior employment YTD: use max from previous payrolls or current record values
+      const prevPriorGross = Math.max(0, ...previousPayrolls.map(p => parseFloat(p.prior_ytd_gross || 0)));
+      const prevPriorEpf = Math.max(0, ...previousPayrolls.map(p => parseFloat(p.prior_ytd_epf || 0)));
+      const prevPriorPcb = Math.max(0, ...previousPayrolls.map(p => parseFloat(p.prior_ytd_pcb || 0)));
+      const effectivePriorGross = Math.max(prevPriorGross, parseFloat(updates.prior_ytd_gross ?? payroll.prior_ytd_gross ?? 0));
+      const effectivePriorEpf = Math.max(prevPriorEpf, parseFloat(updates.prior_ytd_epf ?? payroll.prior_ytd_epf ?? 0));
+      const effectivePriorPcb = Math.max(prevPriorPcb, parseFloat(updates.prior_ytd_pcb ?? payroll.prior_ytd_pcb ?? 0));
 
       // Fetch company-specific statutory rates from DB
       const rateOverrides = await getCompanyRates(req.user.company_id);
@@ -389,9 +412,9 @@ exports.updatePayroll = async (req, res, next) => {
           disabled_spouse: employee?.disabled_spouse || false
         },
         ytd: {
-          gross: ytdGross,
-          epf: ytdEpf,
-          pcbDeducted: ytdPcbDeducted,
+          gross: ytdGross + effectivePriorGross,
+          epf: ytdEpf + effectivePriorEpf,
+          pcbDeducted: ytdPcbDeducted + effectivePriorPcb,
           zakat: 0
         },
         currentMonth: payroll.month,
@@ -1208,7 +1231,7 @@ exports.bulkSubmitForApproval = async (req, res, next) => {
     const { payroll_ids } = req.body;
 
     const payrolls = await Payroll.findAll({
-      where: { id: { [Op.in]: payroll_ids } },
+      where: { public_id: { [Op.in]: payroll_ids } },
       include: [{
         model: Employee,
         as: 'employee',
@@ -1218,7 +1241,7 @@ exports.bulkSubmitForApproval = async (req, res, next) => {
       }]
     });
 
-    const foundIds = new Set(payrolls.map(p => p.id));
+    const foundIds = new Set(payrolls.map(p => p.public_id));
     const results = [];
 
     for (const id of payroll_ids) {
@@ -1230,13 +1253,13 @@ exports.bulkSubmitForApproval = async (req, res, next) => {
     for (const payroll of payrolls) {
       try {
         if (payroll.status !== 'Draft') {
-          results.push({ id: payroll.id, success: false, message: `Cannot submit: status is '${payroll.status}', expected 'Draft'` });
+          results.push({ id: payroll.public_id, success: false, message: `Cannot submit: status is '${payroll.status}', expected 'Draft'` });
           continue;
         }
         await payroll.update({ status: 'Pending', submitted_by: req.user.id, submitted_at: new Date() });
-        results.push({ id: payroll.id, success: true, message: 'Submitted for approval' });
+        results.push({ id: payroll.public_id, success: true, message: 'Submitted for approval' });
       } catch (error) {
-        results.push({ id: payroll.id, success: false, message: error.message });
+        results.push({ id: payroll.public_id, success: false, message: error.message });
       }
     }
 
@@ -1264,7 +1287,7 @@ exports.bulkApprovePayroll = async (req, res, next) => {
     const { payroll_ids } = req.body;
 
     const payrolls = await Payroll.findAll({
-      where: { id: { [Op.in]: payroll_ids } },
+      where: { public_id: { [Op.in]: payroll_ids } },
       include: [{
         model: Employee,
         as: 'employee',
@@ -1274,7 +1297,7 @@ exports.bulkApprovePayroll = async (req, res, next) => {
       }]
     });
 
-    const foundIds = new Set(payrolls.map(p => p.id));
+    const foundIds = new Set(payrolls.map(p => p.public_id));
     const results = [];
 
     for (const id of payroll_ids) {
@@ -1286,13 +1309,13 @@ exports.bulkApprovePayroll = async (req, res, next) => {
     for (const payroll of payrolls) {
       try {
         if (payroll.status !== 'Pending') {
-          results.push({ id: payroll.id, success: false, message: `Cannot approve: status is '${payroll.status}', expected 'Pending'` });
+          results.push({ id: payroll.public_id, success: false, message: `Cannot approve: status is '${payroll.status}', expected 'Pending'` });
           continue;
         }
         await payroll.update({ status: 'Approved', approved_by: req.user.id, approved_at: new Date() });
-        results.push({ id: payroll.id, success: true, message: 'Approved successfully' });
+        results.push({ id: payroll.public_id, success: true, message: 'Approved successfully' });
       } catch (error) {
-        results.push({ id: payroll.id, success: false, message: error.message });
+        results.push({ id: payroll.public_id, success: false, message: error.message });
       }
     }
 
@@ -1320,7 +1343,7 @@ exports.bulkMarkAsPaid = async (req, res, next) => {
     const { payroll_ids } = req.body;
 
     const payrolls = await Payroll.findAll({
-      where: { id: { [Op.in]: payroll_ids } },
+      where: { public_id: { [Op.in]: payroll_ids } },
       include: [{
         model: Employee,
         as: 'employee',
@@ -1330,7 +1353,7 @@ exports.bulkMarkAsPaid = async (req, res, next) => {
       }]
     });
 
-    const foundIds = new Set(payrolls.map(p => p.id));
+    const foundIds = new Set(payrolls.map(p => p.public_id));
     const results = [];
 
     for (const id of payroll_ids) {
@@ -1342,11 +1365,11 @@ exports.bulkMarkAsPaid = async (req, res, next) => {
     for (const payroll of payrolls) {
       try {
         if (payroll.status !== 'Approved') {
-          results.push({ id: payroll.id, success: false, message: `Cannot mark as paid: status is '${payroll.status}', expected 'Approved'` });
+          results.push({ id: payroll.public_id, success: false, message: `Cannot mark as paid: status is '${payroll.status}', expected 'Approved'` });
           continue;
         }
         await payroll.update({ status: 'Paid' });
-        results.push({ id: payroll.id, success: true, message: 'Marked as paid' });
+        results.push({ id: payroll.public_id, success: true, message: 'Marked as paid' });
 
         // Send payslip notification email
         if (payroll.employee?.user_id) {
@@ -1371,7 +1394,7 @@ exports.bulkMarkAsPaid = async (req, res, next) => {
           }
         }
       } catch (error) {
-        results.push({ id: payroll.id, success: false, message: error.message });
+        results.push({ id: payroll.public_id, success: false, message: error.message });
       }
     }
 
@@ -1399,7 +1422,7 @@ exports.bulkCancelPayroll = async (req, res, next) => {
     const { payroll_ids } = req.body;
 
     const payrolls = await Payroll.findAll({
-      where: { id: { [Op.in]: payroll_ids } },
+      where: { public_id: { [Op.in]: payroll_ids } },
       include: [{
         model: Employee,
         as: 'employee',
@@ -1409,7 +1432,7 @@ exports.bulkCancelPayroll = async (req, res, next) => {
       }]
     });
 
-    const foundIds = new Set(payrolls.map(p => p.id));
+    const foundIds = new Set(payrolls.map(p => p.public_id));
     const results = [];
 
     for (const id of payroll_ids) {
@@ -1421,17 +1444,17 @@ exports.bulkCancelPayroll = async (req, res, next) => {
     for (const payroll of payrolls) {
       try {
         if (payroll.status === 'Paid') {
-          results.push({ id: payroll.id, success: false, message: 'Cannot cancel paid payroll' });
+          results.push({ id: payroll.public_id, success: false, message: 'Cannot cancel paid payroll' });
           continue;
         }
         if (payroll.status === 'Cancelled') {
-          results.push({ id: payroll.id, success: false, message: 'Payroll is already cancelled' });
+          results.push({ id: payroll.public_id, success: false, message: 'Payroll is already cancelled' });
           continue;
         }
         await payroll.update({ status: 'Cancelled' });
-        results.push({ id: payroll.id, success: true, message: 'Cancelled successfully' });
+        results.push({ id: payroll.public_id, success: true, message: 'Cancelled successfully' });
       } catch (error) {
-        results.push({ id: payroll.id, success: false, message: error.message });
+        results.push({ id: payroll.public_id, success: false, message: error.message });
       }
     }
 
@@ -1459,7 +1482,7 @@ exports.bulkPermanentDeletePayroll = async (req, res, next) => {
     const { payroll_ids } = req.body;
 
     const payrolls = await Payroll.findAll({
-      where: { id: { [Op.in]: payroll_ids } },
+      where: { public_id: { [Op.in]: payroll_ids } },
       include: [{
         model: Employee,
         as: 'employee',
@@ -1469,7 +1492,7 @@ exports.bulkPermanentDeletePayroll = async (req, res, next) => {
       }]
     });
 
-    const foundIds = new Set(payrolls.map(p => p.id));
+    const foundIds = new Set(payrolls.map(p => p.public_id));
     const results = [];
 
     for (const id of payroll_ids) {
@@ -1481,13 +1504,13 @@ exports.bulkPermanentDeletePayroll = async (req, res, next) => {
     for (const payroll of payrolls) {
       try {
         if (payroll.status !== 'Cancelled') {
-          results.push({ id: payroll.id, success: false, message: `Cannot delete: status is '${payroll.status}', expected 'Cancelled'` });
+          results.push({ id: payroll.public_id, success: false, message: `Cannot delete: status is '${payroll.status}', expected 'Cancelled'` });
           continue;
         }
         await payroll.destroy();
-        results.push({ id: payroll.id, success: true, message: 'Permanently deleted' });
+        results.push({ id: payroll.public_id, success: true, message: 'Permanently deleted' });
       } catch (error) {
-        results.push({ id: payroll.id, success: false, message: error.message });
+        results.push({ id: payroll.public_id, success: false, message: error.message });
       }
     }
 

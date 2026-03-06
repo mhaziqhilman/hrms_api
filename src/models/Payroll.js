@@ -101,6 +101,19 @@ const Payroll = sequelize.define('Payroll', {
     type: DataTypes.DECIMAL(10, 2),
     defaultValue: 0.00
   },
+  // Prior Employment YTD (for mid-year joiners)
+  prior_ytd_gross: {
+    type: DataTypes.DECIMAL(10, 2),
+    defaultValue: 0.00
+  },
+  prior_ytd_epf: {
+    type: DataTypes.DECIMAL(10, 2),
+    defaultValue: 0.00
+  },
+  prior_ytd_pcb: {
+    type: DataTypes.DECIMAL(10, 2),
+    defaultValue: 0.00
+  },
   // Other Deductions
   unpaid_leave_deduction: {
     type: DataTypes.DECIMAL(10, 2),

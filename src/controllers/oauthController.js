@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const jwtConfig = require('../config/jwt');
 const { User, Employee, Company, UserCompany } = require('../models');
 const logger = require('../utils/logger');
@@ -23,6 +24,17 @@ const generateToken = (user) => {
       audience: jwtConfig.options.audience
     }
   );
+};
+
+/**
+ * Generate and persist a refresh token for a user (7-day, one-time use)
+ * Same logic as authController.generateAndSaveRefreshToken
+ */
+const generateAndSaveRefreshToken = async (user) => {
+  const refreshToken = crypto.randomBytes(48).toString('hex');
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+  await user.update({ refresh_token: refreshToken, refresh_token_expires_at: expiresAt });
+  return refreshToken;
 };
 
 /**
@@ -68,6 +80,7 @@ const oauthCallback = async (req, res) => {
     });
 
     const token = generateToken(fullUser);
+    const refreshToken = await generateAndSaveRefreshToken(fullUser);
 
     // Build user object for frontend
     const userData = {
@@ -85,10 +98,11 @@ const oauthCallback = async (req, res) => {
 
     const encodedUser = encodeURIComponent(JSON.stringify(userData));
     const encodedToken = encodeURIComponent(token);
+    const encodedRefreshToken = encodeURIComponent(refreshToken);
 
     logger.info(`OAuth login successful for ${fullUser.email}, redirecting to frontend`);
 
-    res.redirect(`${frontendUrl}/auth/oauth-callback?token=${encodedToken}&user=${encodedUser}`);
+    res.redirect(`${frontendUrl}/auth/oauth-callback?token=${encodedToken}&refreshToken=${encodedRefreshToken}&user=${encodedUser}`);
   } catch (error) {
     logger.error(`OAuth callback error: ${error.message}`);
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
