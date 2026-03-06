@@ -15,7 +15,7 @@ exports.submitClaim = async (req, res) => {
 
     // Verify employee exists and belongs to active company
     const employee = await Employee.findOne({
-      where: { id: employee_id, company_id: req.user.company_id }
+      where: { public_id: employee_id, company_id: req.user.company_id }
     });
     if (!employee) {
       return res.status(404).json({
@@ -45,7 +45,7 @@ exports.submitClaim = async (req, res) => {
 
     // Create claim
     const claim = await Claim.create({
-      employee_id,
+      employee_id: employee.id,
       claim_type_id,
       date,
       amount,
@@ -685,21 +685,20 @@ exports.getClaimsSummary = async (req, res) => {
     const { employee_id } = req.params;
     const { year = new Date().getFullYear(), month } = req.query;
 
+    // Verify employee exists and belongs to active company
+    const employee = await Employee.findOne({
+      where: { public_id: employee_id, company_id: req.user.company_id }
+    });
+
     // Check permission - staff can only view their own summary
     if (req.user.role === 'staff') {
-      const employee = await Employee.findOne({ where: { user_id: req.user.id } });
-      if (!employee || employee.id !== parseInt(employee_id)) {
+      if (!employee || employee.id !== req.user.employee_id) {
         return res.status(403).json({
           success: false,
           message: 'You can only view your own claims summary'
         });
       }
     }
-
-    // Verify employee exists and belongs to active company
-    const employee = await Employee.findOne({
-      where: { id: employee_id, company_id: req.user.company_id }
-    });
     if (!employee) {
       return res.status(404).json({
         success: false,
@@ -728,7 +727,7 @@ exports.getClaimsSummary = async (req, res) => {
     // Get all claims for the period
     const claims = await Claim.findAll({
       where: {
-        employee_id,
+        employee_id: employee.id,
         ...dateFilter
       },
       include: [
@@ -742,7 +741,7 @@ exports.getClaimsSummary = async (req, res) => {
 
     // Calculate summary
     const summary = {
-      employee_id: parseInt(employee_id),
+      employee_id: employee.id,
       employee_name: employee.full_name,
       period: month ? `${year}-${String(month).padStart(2, '0')}` : year.toString(),
       total_claims: claims.length,

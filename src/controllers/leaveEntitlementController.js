@@ -10,7 +10,11 @@ exports.getAllEntitlements = async (req, res, next) => {
 
     const where = {};
     if (year) where.year = parseInt(year);
-    if (employee_id) where.employee_id = parseInt(employee_id);
+    if (employee_id) {
+      const emp = await Employee.findOne({ where: { public_id: employee_id }, attributes: ['id'] });
+      if (emp) where.employee_id = emp.id;
+      else where.employee_id = -1;
+    }
     if (leave_type_id) where.leave_type_id = parseInt(leave_type_id);
 
     const employeeWhere = { company_id };
@@ -102,7 +106,7 @@ exports.createEntitlement = async (req, res, next) => {
     const company_id = req.user.company_id;
 
     // Validate employee belongs to company
-    const employee = await Employee.findOne({ where: { id: employee_id, company_id } });
+    const employee = await Employee.findOne({ where: { public_id: employee_id, company_id } });
     if (!employee) {
       return res.status(404).json({ success: false, message: 'Employee not found in your company' });
     }
@@ -115,7 +119,7 @@ exports.createEntitlement = async (req, res, next) => {
 
     // Check duplicate
     const existing = await LeaveEntitlement.findOne({
-      where: { employee_id, leave_type_id, year }
+      where: { employee_id: employee.id, leave_type_id, year }
     });
     if (existing) {
       return res.status(409).json({
@@ -127,7 +131,7 @@ exports.createEntitlement = async (req, res, next) => {
     const balance_days = parseFloat(total_days) + parseFloat(carry_forward_days);
 
     const entitlement = await LeaveEntitlement.create({
-      employee_id,
+      employee_id: employee.id,
       leave_type_id,
       year,
       total_days,

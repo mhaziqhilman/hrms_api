@@ -128,7 +128,7 @@ const linkUserToEmployee = async (userId, employeeId) => {
     throw new Error('User not found');
   }
 
-  const employee = await Employee.findByPk(employeeId);
+  const employee = await Employee.findOne({ where: { public_id: employeeId } });
   if (!employee) {
     throw new Error('Employee not found');
   }
@@ -140,7 +140,7 @@ const linkUserToEmployee = async (userId, employeeId) => {
 
   // Check if user is already linked to another employee
   const existingLink = await Employee.findOne({ where: { user_id: userId } });
-  if (existingLink && existingLink.id !== employeeId) {
+  if (existingLink && existingLink.id !== employee.id) {
     throw new Error('This user is already linked to another employee record');
   }
 
@@ -176,7 +176,7 @@ const getUnlinkedEmployees = async (companyId) => {
       employment_status: 'Active',
       ...(companyId ? { company_id: companyId } : {})
     },
-    attributes: ['id', 'employee_id', 'full_name', 'position', 'department', 'email'],
+    attributes: ['id', 'public_id', 'employee_id', 'full_name', 'position', 'department', 'email'],
     order: [['full_name', 'ASC']]
   });
 

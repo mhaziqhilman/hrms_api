@@ -295,7 +295,7 @@ exports.updateEmployee = async (req, res, next) => {
     if (updates.employee_id || updates.ic_no) {
       const existingEmployee = await Employee.findOne({
         where: {
-          id: { [Op.ne]: id },
+          public_id: { [Op.ne]: id },
           company_id: req.user.company_id,
           [Op.or]: [
             updates.employee_id ? { employee_id: updates.employee_id } : null,

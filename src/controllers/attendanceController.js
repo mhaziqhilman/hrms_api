@@ -35,17 +35,9 @@ exports.clockIn = async (req, res, next) => {
       location_address
     } = req.body;
 
-    // Staff can only clock in for themselves
-    if (req.user.role === 'staff' && req.user.employee_id !== parseInt(employee_id)) {
-      return res.status(403).json({
-        success: false,
-        message: 'You can only clock in for yourself'
-      });
-    }
-
     // Validate employee exists and belongs to active company
     const employee = await Employee.findOne({
-      where: { id: employee_id, company_id: req.user.company_id }
+      where: { public_id: employee_id, company_id: req.user.company_id }
     });
     if (!employee) {
       return res.status(404).json({
@@ -54,12 +46,20 @@ exports.clockIn = async (req, res, next) => {
       });
     }
 
+    // Staff can only clock in for themselves
+    if (req.user.role === 'staff' && employee.id !== req.user.employee_id) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only clock in for yourself'
+      });
+    }
+
     const today = getTodayDate();
 
     // Check if already clocked in today
     const existingAttendance = await Attendance.findOne({
       where: {
-        employee_id,
+        employee_id: employee.id,
         date: today
       }
     });
@@ -76,7 +76,7 @@ exports.clockIn = async (req, res, next) => {
     if (type === 'WFH') {
       const wfhApplication = await WFHApplication.findOne({
         where: {
-          employee_id,
+          employee_id: employee.id,
           date: today,
           status: 'Approved'
         }
@@ -106,7 +106,7 @@ exports.clockIn = async (req, res, next) => {
 
     // Create or update attendance record
     const [attendance, created] = await Attendance.upsert({
-      employee_id,
+      employee_id: employee.id,
       date: today,
       clock_in_time: clockInTime,
       type,
@@ -150,8 +150,19 @@ exports.clockOut = async (req, res, next) => {
       location_address
     } = req.body;
 
+    // Resolve employee by public_id
+    const employee = await Employee.findOne({
+      where: { public_id: employee_id, company_id: req.user.company_id }
+    });
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: 'Employee not found'
+      });
+    }
+
     // Staff can only clock out for themselves
-    if (req.user.role === 'staff' && req.user.employee_id !== parseInt(employee_id)) {
+    if (req.user.role === 'staff' && employee.id !== req.user.employee_id) {
       return res.status(403).json({
         success: false,
         message: 'You can only clock out for yourself'
@@ -163,7 +174,7 @@ exports.clockOut = async (req, res, next) => {
     // Find today's attendance record
     const attendance = await Attendance.findOne({
       where: {
-        employee_id,
+        employee_id: employee.id,
         date: today
       }
     });
@@ -248,8 +259,12 @@ exports.getAllAttendance = async (req, res, next) => {
     const offset = (parseInt(page) - 1) * parseInt(limit);
     const where = {};
 
-    // Apply filters
-    if (employee_id) where.employee_id = employee_id;
+    // Apply filters - resolve public_id to integer employee_id
+    if (employee_id) {
+      const emp = await Employee.findOne({ where: { public_id: employee_id }, attributes: ['id'] });
+      if (emp) where.employee_id = emp.id;
+      else where.employee_id = -1; // No match
+    }
     if (type) where.type = type;
     if (is_late !== undefined) where.is_late = is_late === 'true';
     if (is_early_leave !== undefined) where.is_early_leave = is_early_leave === 'true';
@@ -457,17 +472,9 @@ exports.applyWFH = async (req, res, next) => {
       reason
     } = req.body;
 
-    // Staff can only apply for themselves
-    if (req.user.role === 'staff' && req.user.employee_id !== parseInt(employee_id)) {
-      return res.status(403).json({
-        success: false,
-        message: 'You can only apply WFH for yourself'
-      });
-    }
-
     // Validate employee exists and belongs to active company
     const employee = await Employee.findOne({
-      where: { id: employee_id, company_id: req.user.company_id }
+      where: { public_id: employee_id, company_id: req.user.company_id }
     });
     if (!employee) {
       return res.status(404).json({
@@ -476,10 +483,18 @@ exports.applyWFH = async (req, res, next) => {
       });
     }
 
+    // Staff can only apply for themselves
+    if (req.user.role === 'staff' && employee.id !== req.user.employee_id) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only apply WFH for yourself'
+      });
+    }
+
     // Check if WFH application already exists for this date
     const existingApplication = await WFHApplication.findOne({
       where: {
-        employee_id,
+        employee_id: employee.id,
         date,
         status: { [Op.in]: ['Pending', 'Approved'] }
       }
@@ -494,7 +509,7 @@ exports.applyWFH = async (req, res, next) => {
 
     // Create WFH application
     const wfhApplication = await WFHApplication.create({
-      employee_id,
+      employee_id: employee.id,
       date,
       reason,
       status: 'Pending'
@@ -547,7 +562,11 @@ exports.getAllWFH = async (req, res, next) => {
 
     // Apply filters
     if (status) where.status = status;
-    if (employee_id) where.employee_id = employee_id;
+    if (employee_id) {
+      const emp = await Employee.findOne({ where: { public_id: employee_id }, attributes: ['id'] });
+      if (emp) where.employee_id = emp.id;
+      else where.employee_id = -1;
+    }
     if (start_date && end_date) {
       where.date = { [Op.between]: [start_date, end_date] };
     }
@@ -729,18 +748,18 @@ exports.getAttendanceSummary = async (req, res, next) => {
     const { employee_id } = req.params;
     const { month, year } = req.query;
 
+    const employee = await Employee.findOne({
+      where: { public_id: employee_id, company_id: req.user.company_id },
+      attributes: ['id', 'public_id', 'employee_id', 'full_name', 'department']
+    });
+
     // Staff can only view their own summary
-    if (req.user.role === 'staff' && req.user.employee_id !== parseInt(employee_id)) {
+    if (req.user.role === 'staff' && (!employee || employee.id !== req.user.employee_id)) {
       return res.status(403).json({
         success: false,
         message: 'You can only view your own attendance summary'
       });
     }
-
-    const employee = await Employee.findOne({
-      where: { id: employee_id, company_id: req.user.company_id },
-      attributes: ['id', 'employee_id', 'full_name', 'department']
-    });
 
     if (!employee) {
       return res.status(404).json({

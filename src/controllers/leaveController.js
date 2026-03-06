@@ -26,7 +26,11 @@ exports.getAllLeaves = async (req, res, next) => {
 
     // Apply filters
     if (status) where.status = status;
-    if (employee_id) where.employee_id = employee_id;
+    if (employee_id) {
+      const emp = await Employee.findOne({ where: { public_id: employee_id }, attributes: ['id'] });
+      if (emp) where.employee_id = emp.id;
+      else where.employee_id = -1;
+    }
     if (leave_type_id) where.leave_type_id = leave_type_id;
     if (start_date && end_date) {
       where.start_date = { [Op.between]: [start_date, end_date] };
@@ -168,18 +172,18 @@ exports.applyLeave = async (req, res, next) => {
       attachment_url
     } = req.body;
 
+    // Validate employee exists and belongs to active company
+    const employee = await Employee.findOne({
+      where: { public_id: employee_id, company_id: req.user.company_id }
+    });
+
     // Staff can only apply for their own leave
-    if (req.user.role === 'staff' && req.user.employee_id !== parseInt(employee_id)) {
+    if (req.user.role === 'staff' && (!employee || employee.id !== req.user.employee_id)) {
       return res.status(403).json({
         success: false,
         message: 'You can only apply for your own leave'
       });
     }
-
-    // Validate employee exists and belongs to active company
-    const employee = await Employee.findOne({
-      where: { id: employee_id, company_id: req.user.company_id }
-    });
     if (!employee) {
       await transaction.rollback();
       return res.status(404).json({
@@ -211,7 +215,7 @@ exports.applyLeave = async (req, res, next) => {
     const currentYear = new Date().getFullYear();
     const entitlement = await LeaveEntitlement.findOne({
       where: {
-        employee_id,
+        employee_id: employee.id,
         leave_type_id,
         year: currentYear
       }
@@ -237,7 +241,7 @@ exports.applyLeave = async (req, res, next) => {
     // Check for overlapping leave applications
     const overlappingLeave = await Leave.findOne({
       where: {
-        employee_id,
+        employee_id: employee.id,
         status: { [Op.in]: ['Pending', 'Approved'] },
         [Op.or]: [
           {
@@ -266,7 +270,7 @@ exports.applyLeave = async (req, res, next) => {
 
     // Create leave application
     const leave = await Leave.create({
-      employee_id,
+      employee_id: employee.id,
       leave_type_id,
       start_date,
       end_date,
@@ -760,18 +764,18 @@ exports.getLeaveBalance = async (req, res, next) => {
     const { employee_id } = req.params;
     const { year = new Date().getFullYear() } = req.query;
 
+    const employee = await Employee.findOne({
+      where: { public_id: employee_id, company_id: req.user.company_id },
+      attributes: ['id', 'public_id', 'employee_id', 'full_name']
+    });
+
     // Staff can only view their own balance
-    if (req.user.role === 'staff' && req.user.employee_id !== parseInt(employee_id)) {
+    if (req.user.role === 'staff' && (!employee || employee.id !== req.user.employee_id)) {
       return res.status(403).json({
         success: false,
         message: 'You can only view your own leave balance'
       });
     }
-
-    const employee = await Employee.findOne({
-      where: { id: employee_id, company_id: req.user.company_id },
-      attributes: ['id', 'employee_id', 'full_name']
-    });
 
     if (!employee) {
       return res.status(404).json({
@@ -782,7 +786,7 @@ exports.getLeaveBalance = async (req, res, next) => {
 
     const entitlements = await LeaveEntitlement.findAll({
       where: {
-        employee_id,
+        employee_id: employee.id,
         year
       },
       include: [

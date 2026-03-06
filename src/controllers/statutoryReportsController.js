@@ -54,13 +54,13 @@ async function getCompanyInfo(userId) {
  */
 async function buildEAFormData(userId, employeeId, year, companyId) {
   const employee = await Employee.findOne({
-    where: { id: employeeId, ...(companyId ? { company_id: companyId } : {}) }
+    where: { public_id: employeeId, ...(companyId ? { company_id: companyId } : {}) }
   });
   if (!employee) return { error: 'Employee not found' };
 
   const payrollRecords = await Payroll.findAll({
     where: {
-      employee_id: employeeId,
+      employee_id: employee.id,
       year: parseInt(year),
       status: { [Op.in]: ['Approved', 'Paid'] }
     },
@@ -140,7 +140,7 @@ exports.getEAForm = async (req, res, next) => {
 
     // Get employee details (scoped to current company)
     const employee = await Employee.findOne({
-      where: { id: employee_id, company_id: req.user.company_id }
+      where: { public_id: employee_id, company_id: req.user.company_id }
     });
     if (!employee) {
       return res.status(404).json({
@@ -152,7 +152,7 @@ exports.getEAForm = async (req, res, next) => {
     // Get all YTD records for the year (to get final month data)
     const ytdRecords = await YTDStatutory.findAll({
       where: {
-        employee_id,
+        employee_id: employee.id,
         year: parseInt(year)
       },
       order: [['month', 'DESC']],
@@ -162,7 +162,7 @@ exports.getEAForm = async (req, res, next) => {
     // Get all payroll records for the year
     const payrollRecords = await Payroll.findAll({
       where: {
-        employee_id,
+        employee_id: employee.id,
         year: parseInt(year),
         status: { [Op.in]: ['Approved', 'Paid'] }
       },
@@ -330,7 +330,7 @@ exports.sendEAFormEmail = async (req, res, next) => {
     }
 
     // Get employee's email (prefer user account email, fall back to employee email)
-    const employee = await Employee.findByPk(employee_id, { attributes: ['user_id', 'full_name', 'email'] });
+    const employee = await Employee.findOne({ where: { public_id: employee_id }, attributes: ['id', 'user_id', 'full_name', 'email'] });
     let recipientEmail = null;
     if (employee?.user_id) {
       const user = await User.findByPk(employee.user_id, { attributes: ['email'] });
@@ -1187,12 +1187,12 @@ exports.getEmployeesForEA = async (req, res, next) => {
       include: [{
         model: Employee,
         as: 'employee',
-        attributes: ['id', 'employee_id', 'full_name', 'ic_no', 'department', 'position'],
+        attributes: ['id', 'public_id', 'employee_id', 'full_name', 'ic_no', 'department', 'position'],
         where: { company_id: req.user.company_id },
         required: true
       }],
       attributes: [[col('Payroll.employee_id'), 'employee_id']],
-      group: ['Payroll.employee_id', 'employee.id', 'employee.employee_id', 'employee.full_name', 'employee.ic_no', 'employee.department', 'employee.position'],
+      group: ['Payroll.employee_id', 'employee.id', 'employee.public_id', 'employee.employee_id', 'employee.full_name', 'employee.ic_no', 'employee.department', 'employee.position'],
       raw: false
     });
 
@@ -1206,6 +1206,7 @@ exports.getEmployeesForEA = async (req, res, next) => {
 
     const employees = Array.from(employeesMap.values()).map(emp => ({
       id: emp.id,
+      public_id: emp.public_id,
       employee_id: emp.employee_id,
       full_name: emp.full_name,
       ic_no: emp.ic_no,

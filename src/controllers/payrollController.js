@@ -38,7 +38,11 @@ exports.getAllPayroll = async (req, res, next) => {
     if (status) where.status = status;
     if (year) where.year = parseInt(year);
     if (month) where.month = parseInt(month);
-    if (employee_id) where.employee_id = parseInt(employee_id);
+    if (employee_id) {
+      const emp = await Employee.findOne({ where: { public_id: employee_id }, attributes: ['id'] });
+      if (emp) where.employee_id = emp.id;
+      else where.employee_id = -1;
+    }
 
     // Add search functionality for employee name or employee_id
     let hasSearch = false;
@@ -170,7 +174,7 @@ exports.calculatePayroll = async (req, res, next) => {
 
     // Validate employee belongs to active company
     const employee = await Employee.findOne({
-      where: { id: employee_id, company_id: req.user.company_id }
+      where: { public_id: employee_id, company_id: req.user.company_id }
     });
     if (!employee) {
       await transaction.rollback();
@@ -190,7 +194,7 @@ exports.calculatePayroll = async (req, res, next) => {
 
     // Check if payroll already exists for this employee/month/year
     const existing = await Payroll.findOne({
-      where: { employee_id, year, month }
+      where: { employee_id: employee.id, year, month }
     });
 
     if (existing) {
@@ -216,7 +220,7 @@ exports.calculatePayroll = async (req, res, next) => {
     // Fetch YTD data from previous payroll records for PCB calculation
     const previousPayrolls = await Payroll.findAll({
       where: {
-        employee_id,
+        employee_id: employee.id,
         year,
         month: { [Op.lt]: month },
         status: { [Op.notIn]: ['Cancelled'] }
@@ -271,7 +275,7 @@ exports.calculatePayroll = async (req, res, next) => {
 
     // Create payroll record
     const payroll = await Payroll.create({
-      employee_id,
+      employee_id: employee.id,
       pay_period_start,
       pay_period_end,
       payment_date: payment_date || new Date(year, month, 25), // Default to 25th of next month
