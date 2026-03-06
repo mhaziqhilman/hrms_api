@@ -78,9 +78,9 @@ app.use(helmet({
     preload: true
   },
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-  crossOriginEmbedderPolicy: true,
+  crossOriginEmbedderPolicy: false,
   crossOriginOpenerPolicy: { policy: 'same-origin' },
-  crossOriginResourcePolicy: { policy: 'same-origin' }
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
 // Permissions-Policy header (not included in Helmet by default)
