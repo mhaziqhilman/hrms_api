@@ -307,7 +307,7 @@ exports.calculatePayroll = async (req, res, next) => {
     }, { transaction });
 
     // Update or create YTD Statutory record
-    await updateYTDStatutory(employee_id, year, month, statutory, gross_salary, net_salary, transaction);
+    await updateYTDStatutory(employee.id, year, month, statutory, gross_salary, net_salary, transaction);
 
     await transaction.commit();
 

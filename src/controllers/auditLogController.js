@@ -39,7 +39,7 @@ exports.getAuditLogs = async (req, res) => {
         {
           model: User,
           as: 'user',
-          attributes: ['id', 'email', 'full_name', 'role']
+          attributes: ['id', 'email', 'role']
         }
       ],
       order: [['created_at', 'DESC']],

@@ -201,12 +201,12 @@ const roundTo2 = (value) => Math.round(value * 100) / 100;
  */
 const roundPCB = (value) => {
   if (value <= 0) return 0;
-  // Truncate to 2 decimal places
-  const truncated = Math.floor(value * 100) / 100;
-  // Round up to nearest 5 sen (0.05)
-  const remainder = truncated % 0.05;
-  if (remainder === 0) return truncated;
-  return roundTo2(truncated + (0.05 - remainder));
+  // Work in integer sen to avoid floating-point precision issues
+  const sen = Math.floor(value * 100); // truncate to 2 decimal places in sen
+  const remainder = sen % 5;
+  // Round up to nearest 5 sen
+  const roundedSen = remainder === 0 ? sen : sen + (5 - remainder);
+  return roundedSen / 100;
 };
 
 /**

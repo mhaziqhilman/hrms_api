@@ -23,7 +23,7 @@ const validate = (req, res, next) => {
 
 // Validation rules
 const calculatePayrollValidation = [
-  body('employee_id').isInt().withMessage('Employee ID must be an integer'),
+  body('employee_id').isString().notEmpty().withMessage('Employee ID is required'),
   body('year').isInt({ min: 2020, max: 2100 }).withMessage('Year must be a valid integer'),
   body('month').isInt({ min: 1, max: 12 }).withMessage('Month must be between 1 and 12'),
   body('allowances').optional().isFloat({ min: 0 }).withMessage('Allowances must be a positive number'),
@@ -59,7 +59,7 @@ const queryValidation = [
   query('status').optional().isIn(['Draft', 'Pending', 'Approved', 'Paid', 'Cancelled']).withMessage('Invalid status'),
   query('year').optional().isInt({ min: 2020, max: 2100 }).withMessage('Invalid year'),
   query('month').optional().isInt({ min: 1, max: 12 }).withMessage('Month must be between 1 and 12'),
-  query('employee_id').optional().isInt().withMessage('Employee ID must be an integer')
+  query('employee_id').optional().isString().withMessage('Employee ID must be a string')
 ];
 
 /**
