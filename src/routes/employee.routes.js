@@ -98,6 +98,18 @@ router.get(
 );
 
 /**
+ * @route   GET /api/employees/my-team
+ * @desc    Get direct reports for current manager (or same-department members)
+ * @access  Private (Manager+)
+ */
+router.get(
+  '/my-team',
+  verifyToken,
+  requireManager,
+  employeeController.getMyTeam
+);
+
+/**
  * @route   GET /api/employees/me
  * @desc    Get own employee profile
  * @access  Private (All authenticated users)

@@ -54,10 +54,32 @@ exports.getAllEmployees = async (req, res, next) => {
       order: [['created_at', 'DESC']],
       attributes: {
         exclude: ['user_id'] // Exclude sensitive fields
-      }
+      },
+      include: [
+        {
+          model: User,
+          as: 'user',
+          attributes: ['avatar_url'],
+          required: false
+        }
+      ]
     });
 
-    logger.info(`Retrieved ${rows.length} employees`, {
+    // Convert photo_url storage paths to signed URLs
+    const storageService = require('../services/supabaseStorageService');
+    const employees = await Promise.all(rows.map(async (row) => {
+      const emp = row.toJSON();
+      if (emp.photo_url && storageService.isConfigured()) {
+        try {
+          emp.photo_url = await storageService.getSignedUrl(emp.photo_url, 3600);
+        } catch (err) {
+          emp.photo_url = null;
+        }
+      }
+      return emp;
+    }));
+
+    logger.info(`Retrieved ${employees.length} employees`, {
       user_id: req.user.id,
       filters: { status, department, employment_type, search }
     });
@@ -65,7 +87,7 @@ exports.getAllEmployees = async (req, res, next) => {
     res.status(200).json({
       success: true,
       data: {
-        employees: rows,
+        employees,
         pagination: {
           total: count,
           currentPage: parseInt(page),
@@ -76,6 +98,69 @@ exports.getAllEmployees = async (req, res, next) => {
     });
   } catch (error) {
     logger.error('Error fetching employees:', error);
+    next(error);
+  }
+};
+
+/**
+ * Get my team (direct reports for the current manager)
+ */
+exports.getMyTeam = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const companyId = req.user.company_id;
+
+    // Find the manager's own employee record
+    const managerEmployee = await Employee.findOne({
+      where: { user_id: userId, company_id: companyId }
+    });
+
+    if (!managerEmployee) {
+      return res.status(200).json({
+        success: true,
+        data: []
+      });
+    }
+
+    // Find direct reports
+    let teamMembers = await Employee.findAll({
+      where: {
+        company_id: companyId,
+        reporting_manager_id: managerEmployee.id,
+        employment_status: 'Active'
+      },
+      attributes: [
+        'id', 'public_id', 'employee_id', 'full_name', 'email', 'mobile',
+        'position', 'department', 'employment_type', 'employment_status',
+        'join_date', 'photo_url'
+      ],
+      order: [['full_name', 'ASC']]
+    });
+
+    // If no direct reports, fall back to same-department members
+    if (teamMembers.length === 0 && managerEmployee.department) {
+      teamMembers = await Employee.findAll({
+        where: {
+          company_id: companyId,
+          department: managerEmployee.department,
+          employment_status: 'Active',
+          id: { [Op.ne]: managerEmployee.id }
+        },
+        attributes: [
+          'id', 'public_id', 'employee_id', 'full_name', 'email', 'mobile',
+          'position', 'department', 'employment_type', 'employment_status',
+          'join_date', 'photo_url'
+        ],
+        order: [['full_name', 'ASC']]
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: teamMembers
+    });
+  } catch (error) {
+    logger.error('Error fetching my team:', error);
     next(error);
   }
 };
@@ -94,6 +179,12 @@ exports.getEmployeeById = async (req, res, next) => {
           model: Employee,
           as: 'manager',
           attributes: ['id', 'employee_id', 'full_name', 'position']
+        },
+        {
+          model: User,
+          as: 'user',
+          attributes: ['avatar_url'],
+          required: false
         }
       ]
     });
@@ -113,11 +204,27 @@ exports.getEmployeeById = async (req, res, next) => {
       });
     }
 
+    // Convert photo_url storage path to signed URL
+    const employeeData = employee.toJSON();
+    if (employeeData.photo_url) {
+      try {
+        const storageService = require('../services/supabaseStorageService');
+        if (storageService.isConfigured()) {
+          employeeData.photo_url = await storageService.getSignedUrl(employeeData.photo_url, 3600);
+        } else {
+          employeeData.photo_url = null;
+        }
+      } catch (err) {
+        logger.warn(`Failed to get signed URL for employee photo: ${err.message}`);
+        employeeData.photo_url = null;
+      }
+    }
+
     logger.info(`Employee ${id} retrieved by user ${req.user.id}`);
 
     res.status(200).json({
       success: true,
-      data: employee
+      data: employeeData
     });
   } catch (error) {
     logger.error(`Error fetching employee ${req.params.id}:`, error);

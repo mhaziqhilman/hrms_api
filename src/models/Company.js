@@ -51,6 +51,18 @@ const Company = sequelize.define('Company', {
     allowNull: true,
     field: 'logo_url'
   },
+  primary_color: {
+    type: DataTypes.STRING(7),
+    allowNull: true,
+    defaultValue: '#6b21a8',
+    field: 'primary_color'
+  },
+  secondary_color: {
+    type: DataTypes.STRING(7),
+    allowNull: true,
+    defaultValue: '#0891b2',
+    field: 'secondary_color'
+  },
   // Statutory / Employer Registration Fields
   e_file_no: {
     type: DataTypes.STRING(30),

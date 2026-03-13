@@ -31,7 +31,7 @@ const getUsers = async ({ page = 1, limit = 10, search, role, is_active, company
       {
         model: Employee,
         as: 'employee',
-        attributes: ['id', 'employee_id', 'full_name', 'position', 'department', 'employment_status']
+        attributes: ['id', 'employee_id', 'full_name', 'position', 'department', 'employment_status', 'photo_url']
       },
       {
         model: Company,

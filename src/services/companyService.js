@@ -127,7 +127,7 @@ const updateCompany = async (companyId, updateData) => {
     'size', 'country', 'address', 'phone', 'website',
     'e_file_no', 'employer_epf_no', 'employer_socso_code',
     'signatory_name', 'signatory_position', 'lhdn_branch',
-    'employer_phone'
+    'employer_phone', 'primary_color', 'secondary_color'
   ];
 
   const filteredData = {};

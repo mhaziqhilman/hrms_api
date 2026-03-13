@@ -13,7 +13,8 @@ const MONTH_NAMES = [
  * @param {String} registrationNo - Company registration number
  * @returns {Promise<Buffer>} PDF buffer
  */
-const generatePayslipPDF = async (data, companyName = 'Company', registrationNo = '') => {
+const generatePayslipPDF = async (data, companyName = 'Company', registrationNo = '', brandColors = {}) => {
+  const { primaryColor = '#6b21a8', secondaryColor = '#0891b2' } = brandColors;
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({ size: 'A4', margin: 45 });
@@ -47,9 +48,11 @@ const generatePayslipPDF = async (data, companyName = 'Company', registrationNo 
 
       doc.fillColor('#000');
 
-      // Red divider
+      // Brand-colored gradient divider
       const divY = registrationNo ? 90 : 82;
-      doc.moveTo(L, divY).lineTo(R, divY).lineWidth(1.5).strokeColor('#c0392b').stroke();
+      const grad = doc.linearGradient(L, divY, R, divY);
+      grad.stop(0, primaryColor).stop(1, secondaryColor);
+      doc.moveTo(L, divY).lineTo(R, divY).lineWidth(1.5).strokeOpacity(1).stroke(grad);
       doc.strokeColor('#000').lineWidth(0.5);
 
       // ── EMPLOYEE INFO ──

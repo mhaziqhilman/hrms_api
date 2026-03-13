@@ -753,7 +753,7 @@ exports.generatePayslip = async (req, res, next) => {
 
     // Fetch company info
     const company = await Company.findByPk(req.user.company_id, {
-      attributes: ['name', 'registration_no', 'logo_url']
+      attributes: ['name', 'registration_no', 'logo_url', 'primary_color', 'secondary_color']
     });
 
     // Resolve logo to signed URL
@@ -790,7 +790,9 @@ exports.generatePayslip = async (req, res, next) => {
       company: {
         name: company?.name || 'Company',
         registration_no: company?.registration_no || '',
-        logo_url: logoUrl
+        logo_url: logoUrl,
+        primary_color: company?.primary_color || '#6b21a8',
+        secondary_color: company?.secondary_color || '#0891b2'
       },
       employee: {
         id: payroll.employee.id,
@@ -899,7 +901,7 @@ exports.downloadPayslipPdf = async (req, res, next) => {
     }
 
     const company = await Company.findByPk(req.user.company_id, {
-      attributes: ['name', 'registration_no']
+      attributes: ['name', 'registration_no', 'primary_color', 'secondary_color']
     });
 
     // Fetch YTD statutory data
@@ -965,7 +967,10 @@ exports.downloadPayslipPdf = async (req, res, next) => {
       generated_at: new Date().toISOString()
     };
 
-    const pdfBuffer = await generatePayslipPDF(payslipData, company?.name, company?.registration_no);
+    const pdfBuffer = await generatePayslipPDF(payslipData, company?.name, company?.registration_no, {
+      primaryColor: company?.primary_color || '#6b21a8',
+      secondaryColor: company?.secondary_color || '#0891b2'
+    });
 
     const monthName = MONTH_NAMES[payroll.month - 1];
     const fileName = `Payslip - ${monthName} ${payroll.year} (${payroll.employee.full_name}).pdf`;

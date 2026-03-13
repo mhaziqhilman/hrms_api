@@ -24,6 +24,20 @@ const getUsers = async (req, res) => {
       company_id: effectiveCompanyId
     });
 
+    // Convert employee photo_url storage paths to signed URLs
+    const storageService = require('../services/supabaseStorageService');
+    if (storageService.isConfigured()) {
+      await Promise.all(result.users.map(async (user) => {
+        if (user.employee?.photo_url) {
+          try {
+            user.employee.photo_url = await storageService.getSignedUrl(user.employee.photo_url, 3600);
+          } catch (err) {
+            user.employee.photo_url = null;
+          }
+        }
+      }));
+    }
+
     res.json({
       success: true,
       data: result

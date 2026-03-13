@@ -130,7 +130,46 @@ const getAdminDashboard = async (companyId) => {
     raw: false
   });
 
-  // 6. Recent activities - derive from recent records
+  // 6. Employee by type (for donut chart)
+  const employeeByType = await Employee.findAll({
+    attributes: [
+      'employment_type',
+      [fn('COUNT', col('id')), 'count']
+    ],
+    where: { company_id: companyId, employment_status: 'Active' },
+    group: ['employment_type'],
+    raw: true
+  });
+
+  // 7. Gender diversity (for horizontal bar chart)
+  const genderDiversity = await Employee.findAll({
+    attributes: [
+      'gender',
+      [fn('COUNT', col('id')), 'count']
+    ],
+    where: { company_id: companyId, employment_status: 'Active' },
+    group: ['gender'],
+    raw: true
+  });
+
+  // 8. Department distribution (for bar chart)
+  const departmentDistribution = await Employee.findAll({
+    attributes: [
+      'department',
+      [fn('COUNT', col('id')), 'count']
+    ],
+    where: {
+      company_id: companyId,
+      employment_status: 'Active',
+      department: { [Op.ne]: null }
+    },
+    group: ['department'],
+    order: [[literal('count'), 'DESC']],
+    limit: 8,
+    raw: true
+  });
+
+  // 9. Recent activities - derive from recent records
   const recentActivities = [];
 
   // Check latest payroll activity
@@ -240,7 +279,20 @@ const getAdminDashboard = async (companyId) => {
     })),
     recentActivities,
     currentMonth,
-    currentYear
+    currentYear,
+    employeeByType: employeeByType.map(e => ({
+      type: e.employment_type || 'Unknown',
+      count: parseInt(e.count)
+    })),
+    genderDiversity: genderDiversity.map(g => ({
+      gender: g.gender || 'Unknown',
+      count: parseInt(g.count)
+    })),
+    departmentDistribution: departmentDistribution.map(d => ({
+      department: d.department || 'Unknown',
+      count: parseInt(d.count)
+    })),
+    lastUpdated: new Date().toISOString()
   };
 };
 

@@ -3,6 +3,7 @@ const notificationService = require('../services/notificationService');
 const { sendLeaveStatusNotification, shouldSendEmail } = require('../services/emailService');
 const logger = require('../utils/logger');
 const auditService = require('../services/auditService');
+const storageService = require('../services/supabaseStorageService');
 const { Op } = require('sequelize');
 const { sequelize } = require('../config/database');
 
@@ -752,6 +753,106 @@ exports.cancelLeave = async (req, res, next) => {
   } catch (error) {
     await transaction.rollback();
     logger.error(`Error cancelling leave ${req.params.id}:`, error);
+    next(error);
+  }
+};
+
+/**
+ * Get team leave calendar data for a given month
+ * Returns all approved/pending leaves + public holidays for the company
+ */
+exports.getLeaveCalendar = async (req, res, next) => {
+  try {
+    const { year, month } = req.query;
+
+    if (!year || !month) {
+      return res.status(400).json({
+        success: false,
+        message: 'Year and month are required'
+      });
+    }
+
+    const y = parseInt(year);
+    const m = parseInt(month);
+
+    // Calculate first and last day of the month
+    const startDate = `${y}-${String(m).padStart(2, '0')}-01`;
+    const lastDay = new Date(y, m, 0).getDate();
+    const endDate = `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+    // Fetch leaves that overlap with this month (Approved + Pending)
+    const leaves = await Leave.findAll({
+      where: {
+        status: { [Op.in]: ['Approved', 'Pending'] },
+        [Op.or]: [
+          { start_date: { [Op.between]: [startDate, endDate] } },
+          { end_date: { [Op.between]: [startDate, endDate] } },
+          {
+            [Op.and]: [
+              { start_date: { [Op.lte]: startDate } },
+              { end_date: { [Op.gte]: endDate } }
+            ]
+          }
+        ]
+      },
+      include: [
+        {
+          model: Employee,
+          as: 'employee',
+          attributes: ['id', 'employee_id', 'full_name', 'department', 'position', 'photo_url'],
+          where: { company_id: req.user.company_id },
+          required: true
+        },
+        {
+          model: LeaveType,
+          as: 'leave_type',
+          attributes: ['id', 'name', 'is_paid']
+        }
+      ],
+      order: [['start_date', 'ASC']]
+    });
+
+    // Fetch public holidays for this month
+    const { PublicHoliday } = require('../models');
+    const holidays = await PublicHoliday.findAll({
+      where: {
+        company_id: req.user.company_id,
+        date: { [Op.between]: [startDate, endDate] }
+      },
+      order: [['date', 'ASC']]
+    });
+
+    // Convert photo_url storage paths to signed URLs
+    const leavesData = leaves.map(l => l.toJSON());
+    if (storageService.isConfigured()) {
+      await Promise.all(leavesData.map(async (leave) => {
+        if (leave.employee?.photo_url) {
+          try {
+            leave.employee.photo_url = await storageService.getSignedUrl(leave.employee.photo_url, 3600);
+          } catch {
+            leave.employee.photo_url = null;
+          }
+        }
+      }));
+    }
+
+    logger.info(`Retrieved leave calendar for ${year}-${month}`, {
+      user_id: req.user.id,
+      leaves_count: leavesData.length,
+      holidays_count: holidays.length
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        year: y,
+        month: m,
+        leaves: leavesData,
+        holidays
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching leave calendar:', error);
     next(error);
   }
 };

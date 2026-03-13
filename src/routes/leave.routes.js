@@ -74,6 +74,22 @@ router.get(
 );
 
 /**
+ * @route   GET /api/leaves/calendar
+ * @desc    Get team leave calendar data for a given month
+ * @access  Private (All authenticated users)
+ */
+router.get(
+  '/calendar',
+  verifyToken,
+  [
+    query('year').isInt({ min: 2020, max: 2100 }).withMessage('Valid year is required'),
+    query('month').isInt({ min: 1, max: 12 }).withMessage('Valid month is required (1-12)')
+  ],
+  validate,
+  leaveController.getLeaveCalendar
+);
+
+/**
  * @route   GET /api/leaves/balance/:employee_id
  * @desc    Get leave balance for an employee
  * @access  Private (Admin, Manager, Staff - own balance only)
