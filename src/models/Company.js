@@ -103,6 +103,36 @@ const Company = sequelize.define('Company', {
     type: DataTypes.INTEGER,
     allowNull: false,
     field: 'owner_id'
+  },
+  // e-Invoice / LHDN fields
+  tin: {
+    type: DataTypes.STRING(20),
+    allowNull: true
+  },
+  brn: {
+    type: DataTypes.STRING(30),
+    allowNull: true
+  },
+  msic_code: {
+    type: DataTypes.STRING(10),
+    allowNull: true
+  },
+  sst_registration_no: {
+    type: DataTypes.STRING(30),
+    allowNull: true,
+    field: 'sst_registration_no'
+  },
+  invoice_prefix: {
+    type: DataTypes.STRING(10),
+    allowNull: true,
+    defaultValue: 'INV',
+    field: 'invoice_prefix'
+  },
+  next_invoice_number: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    defaultValue: 1,
+    field: 'next_invoice_number'
   }
 }, {
   tableName: 'companies',

@@ -20,18 +20,20 @@ const validate = (req, res, next) => {
 
 // Validation rules
 const clockInValidation = [
-  body('employee_id').isInt().withMessage('Employee ID must be an integer'),
+  body('employee_id').notEmpty().withMessage('Employee ID is required'),
   body('type').optional().isIn(['Office', 'WFH']).withMessage('Type must be Office or WFH'),
   body('location_lat').optional().isDecimal().withMessage('Latitude must be a valid decimal'),
   body('location_long').optional().isDecimal().withMessage('Longitude must be a valid decimal'),
-  body('location_address').optional().isString().withMessage('Location address must be a string')
+  body('location_address').optional().isString().withMessage('Location address must be a string'),
+  body('todo_notes').optional().isString().withMessage('To-do notes must be a string')
 ];
 
 const clockOutValidation = [
-  body('employee_id').isInt().withMessage('Employee ID must be an integer'),
+  body('employee_id').notEmpty().withMessage('Employee ID is required'),
   body('location_lat').optional().isDecimal().withMessage('Latitude must be a valid decimal'),
   body('location_long').optional().isDecimal().withMessage('Longitude must be a valid decimal'),
-  body('location_address').optional().isString().withMessage('Location address must be a string')
+  body('location_address').optional().isString().withMessage('Location address must be a string'),
+  body('todo_notes').optional().isString().withMessage('To-do notes must be a string')
 ];
 
 const updateAttendanceValidation = [
@@ -43,7 +45,7 @@ const updateAttendanceValidation = [
 ];
 
 const applyWFHValidation = [
-  body('employee_id').isInt().withMessage('Employee ID must be an integer'),
+  body('employee_id').notEmpty().withMessage('Employee ID is required'),
   body('date').isISO8601().withMessage('Date must be a valid date'),
   body('reason').notEmpty().withMessage('Reason is required')
 ];
@@ -86,6 +88,15 @@ const summaryQueryValidation = [
   param('employee_id').isUUID().withMessage('Employee ID must be a valid UUID'),
   query('month').optional().isInt({ min: 1, max: 12 }).withMessage('Month must be between 1 and 12'),
   query('year').optional().isInt({ min: 2020, max: 2100 }).withMessage('Invalid year')
+];
+
+const manualAttendanceValidation = [
+  body('employee_id').notEmpty().withMessage('Employee ID is required'),
+  body('date').isISO8601().withMessage('Date must be a valid date'),
+  body('clock_in_time').isISO8601().withMessage('Clock in time must be a valid datetime'),
+  body('clock_out_time').optional({ nullable: true }).isISO8601().withMessage('Clock out time must be a valid datetime'),
+  body('type').optional().isIn(['Office', 'WFH']).withMessage('Type must be Office or WFH'),
+  body('todo_notes').optional().isString().withMessage('To-do notes must be a string')
 ];
 
 /**
@@ -169,6 +180,35 @@ router.patch(
   approveRejectWFHValidation,
   validate,
   attendanceController.approveRejectWFH
+);
+
+/**
+ * @route   POST /api/attendance/manual
+ * @desc    Create manual attendance entry
+ * @access  Private (All authenticated users)
+ * NOTE: Must come before /:id to avoid route conflict
+ */
+router.post(
+  '/manual',
+  verifyToken,
+  manualAttendanceValidation,
+  validate,
+  attendanceController.createManualAttendance
+);
+
+/**
+ * @route   GET /api/attendance/team
+ * @desc    Get team attendance (manager's direct reports)
+ * @access  Private (Manager, Admin)
+ * NOTE: Must come before /:id to avoid route conflict
+ */
+router.get(
+  '/team',
+  verifyToken,
+  requireManager,
+  queryValidation,
+  validate,
+  attendanceController.getTeamAttendance
 );
 
 /**

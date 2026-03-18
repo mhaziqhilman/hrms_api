@@ -17,7 +17,9 @@ exports.getAllEmployees = async (req, res, next) => {
       status,
       department,
       employment_type,
-      search
+      search,
+      sort,
+      order: sortOrder
     } = req.query;
 
     const offset = (page - 1) * limit;
@@ -51,7 +53,9 @@ exports.getAllEmployees = async (req, res, next) => {
       where,
       limit: parseInt(limit),
       offset: parseInt(offset),
-      order: [['created_at', 'DESC']],
+      order: [sort && ['employee_id', 'full_name', 'position', 'employment_type', 'nationality', 'employment_status'].includes(sort)
+        ? [sort, (sortOrder || 'asc').toUpperCase()]
+        : ['created_at', 'DESC']],
       attributes: {
         exclude: ['user_id'] // Exclude sensitive fields
       },

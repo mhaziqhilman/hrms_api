@@ -40,6 +40,7 @@ const announcementCategoryRoutes = require('./routes/announcementCategory.routes
 const notificationRoutes = require('./routes/notification.routes');
 const feedbackRoutes = require('./routes/feedback.routes');
 const auditLogRoutes = require('./routes/auditLog.routes');
+const invoiceRoutes = require('./routes/invoice.routes');
 
 // Initialize express app
 const app = express();
@@ -180,8 +181,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/audit-logs', auditLogRoutes);
 
-// Placeholder routes for other modules (to be implemented)
-// app.use('/api/invoices', invoiceRoutes);
+app.use('/api/invoices', invoiceRoutes);
 
 // 404 handler
 app.use(notFound);

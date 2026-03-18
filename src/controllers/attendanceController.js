@@ -32,7 +32,8 @@ exports.clockIn = async (req, res, next) => {
       type = 'Office',
       location_lat,
       location_long,
-      location_address
+      location_address,
+      todo_notes
     } = req.body;
 
     // Validate employee exists and belongs to active company
@@ -115,6 +116,7 @@ exports.clockIn = async (req, res, next) => {
       location_address,
       is_late,
       late_minutes,
+      todo_notes: todo_notes || null,
       clock_out_time: null,
       total_hours: null
     }, {
@@ -147,7 +149,8 @@ exports.clockOut = async (req, res, next) => {
       employee_id,
       location_lat,
       location_long,
-      location_address
+      location_address,
+      todo_notes
     } = req.body;
 
     // Resolve employee by public_id
@@ -220,7 +223,8 @@ exports.clockOut = async (req, res, next) => {
       early_leave_minutes,
       location_lat: location_lat || attendance.location_lat,
       location_long: location_long || attendance.location_long,
-      location_address: location_address || attendance.location_address
+      location_address: location_address || attendance.location_address,
+      todo_notes: todo_notes !== undefined ? todo_notes : attendance.todo_notes
     });
 
     logger.info(`Clock out recorded for employee ${employee_id}`, {
@@ -473,9 +477,11 @@ exports.applyWFH = async (req, res, next) => {
     } = req.body;
 
     // Validate employee exists and belongs to active company
-    const employee = await Employee.findOne({
-      where: { public_id: employee_id, company_id: req.user.company_id }
-    });
+    const empWhere = { public_id: employee_id };
+    if (req.user.company_id) {
+      empWhere.company_id = req.user.company_id;
+    }
+    const employee = await Employee.findOne({ where: empWhere });
     if (!employee) {
       return res.status(404).json({
         success: false,
@@ -582,6 +588,12 @@ exports.getAllWFH = async (req, res, next) => {
       where.employee_id = req.user.employee_id;
     }
 
+    // Scope to active company
+    const employeeWhere = {};
+    if (req.user.company_id) {
+      employeeWhere.company_id = req.user.company_id;
+    }
+
     const { count, rows } = await WFHApplication.findAndCountAll({
       where,
       include: [
@@ -589,7 +601,7 @@ exports.getAllWFH = async (req, res, next) => {
           model: Employee,
           as: 'employee',
           attributes: ['id', 'employee_id', 'full_name', 'department', 'position'],
-          where: { company_id: req.user.company_id },
+          where: employeeWhere,
           required: true
         },
         {
@@ -635,9 +647,13 @@ exports.approveRejectWFH = async (req, res, next) => {
     const { id } = req.params;
     const { action, rejection_reason } = req.body; // action: 'approve' or 'reject'
 
+    const wfhInclude = { model: Employee, as: 'employee', attributes: [] };
+    if (req.user.company_id) {
+      wfhInclude.where = { company_id: req.user.company_id };
+    }
     const wfhApplication = await WFHApplication.findOne({
-      where: { public_id: id },
-      include: [{ model: Employee, as: 'employee', where: { company_id: req.user.company_id }, attributes: [] }]
+      where: { id },
+      include: [wfhInclude]
     });
 
     if (!wfhApplication) {
@@ -839,6 +855,171 @@ exports.getAttendanceSummary = async (req, res, next) => {
     });
   } catch (error) {
     logger.error(`Error fetching attendance summary for employee ${req.params.employee_id}:`, error);
+    next(error);
+  }
+};
+
+/**
+ * Manual attendance entry (admin/manager only)
+ */
+exports.createManualAttendance = async (req, res, next) => {
+  try {
+    const {
+      employee_id,
+      date,
+      clock_in_time,
+      clock_out_time,
+      type = 'Office',
+      todo_notes
+    } = req.body;
+
+    // Resolve employee
+    const empWhere = { public_id: employee_id };
+    if (req.user.company_id) empWhere.company_id = req.user.company_id;
+    const employee = await Employee.findOne({ where: empWhere });
+    if (!employee) {
+      return res.status(404).json({ success: false, message: 'Employee not found' });
+    }
+
+    // Check for existing record on this date
+    const existing = await Attendance.findOne({
+      where: { employee_id: employee.id, date }
+    });
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        message: 'Attendance record already exists for this date'
+      });
+    }
+
+    // Calculate late/early/hours
+    const clockIn = new Date(clock_in_time);
+    let totalHours = null;
+    let is_early_leave = false;
+    let early_leave_minutes = null;
+
+    if (clock_out_time) {
+      const clockOut = new Date(clock_out_time);
+      totalHours = ((clockOut - clockIn) / (1000 * 60 * 60)).toFixed(2);
+
+      if (type === 'Office') {
+        const outLocal = new Date(clockOut.toLocaleString('en-US', { timeZone: APP_TIMEZONE }));
+        const endOfDay = new Date(outLocal);
+        endOfDay.setHours(18, 0, 0, 0);
+        if (outLocal < endOfDay) {
+          is_early_leave = true;
+          early_leave_minutes = Math.floor((endOfDay - outLocal) / (1000 * 60));
+        }
+      }
+    }
+
+    // Check if late
+    const inLocal = new Date(clockIn.toLocaleString('en-US', { timeZone: APP_TIMEZONE }));
+    const startOfDay = new Date(inLocal);
+    startOfDay.setHours(9, 0, 0, 0);
+    const is_late = type === 'Office' && inLocal > startOfDay;
+    const late_minutes = is_late ? Math.floor((inLocal - startOfDay) / (1000 * 60)) : null;
+
+    const attendance = await Attendance.create({
+      employee_id: employee.id,
+      date,
+      clock_in_time: clockIn,
+      clock_out_time: clock_out_time ? new Date(clock_out_time) : null,
+      total_hours: totalHours,
+      type,
+      is_late,
+      late_minutes,
+      is_early_leave,
+      early_leave_minutes,
+      todo_notes: todo_notes || null
+    });
+
+    const result = await Attendance.findByPk(attendance.id, {
+      include: [{ model: Employee, as: 'employee', attributes: ['id', 'employee_id', 'full_name'] }]
+    });
+
+    logger.info(`Manual attendance created for employee ${employee_id} on ${date}`, { user_id: req.user.id });
+
+    res.status(201).json({
+      success: true,
+      message: 'Attendance record created successfully',
+      data: result
+    });
+  } catch (error) {
+    logger.error('Error creating manual attendance:', error);
+    next(error);
+  }
+};
+
+/**
+ * Get team attendance (manager's direct reports)
+ */
+exports.getTeamAttendance = async (req, res, next) => {
+  try {
+    const { page = 1, limit = 50, start_date, end_date } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+
+    // Find the manager's employee record
+    const managerEmployee = await Employee.findOne({
+      where: { user_id: req.user.id, company_id: req.user.company_id }
+    });
+
+    if (!managerEmployee) {
+      return res.status(200).json({
+        success: true,
+        data: { attendance: [], pagination: { total: 0, page: 1, limit: parseInt(limit), totalPages: 0 } }
+      });
+    }
+
+    // Find direct reports
+    const subordinates = await Employee.findAll({
+      where: { reporting_manager_id: managerEmployee.id, company_id: req.user.company_id },
+      attributes: ['id']
+    });
+
+    const subordinateIds = subordinates.map(s => s.id);
+
+    if (subordinateIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: { attendance: [], pagination: { total: 0, page: 1, limit: parseInt(limit), totalPages: 0 } }
+      });
+    }
+
+    const where = { employee_id: { [Op.in]: subordinateIds } };
+    if (start_date && end_date) {
+      where.date = { [Op.between]: [start_date, end_date] };
+    } else {
+      where.date = getTodayDate();
+    }
+
+    const { count, rows } = await Attendance.findAndCountAll({
+      where,
+      include: [{
+        model: Employee,
+        as: 'employee',
+        attributes: ['id', 'employee_id', 'full_name', 'department', 'position', 'public_id']
+      }],
+      limit: parseInt(limit),
+      offset,
+      order: [['date', 'DESC'], ['clock_in_time', 'ASC']],
+      distinct: true
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        attendance: rows,
+        pagination: {
+          total: count,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          totalPages: Math.ceil(count / parseInt(limit))
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching team attendance:', error);
     next(error);
   }
 };

@@ -328,14 +328,22 @@ const login = async (req, res, next) => {
  */
 const getCurrentUser = async (req, res, next) => {
   try {
+    // Build employee include with active company scope
+    const employeeInclude = {
+      model: Employee,
+      as: 'employee',
+      attributes: { exclude: ['created_at', 'updated_at', 'deleted_at'] },
+      required: false
+    };
+    // Scope employee to active company for multi-company users
+    const activeCompanyId = req.user.company_id;
+    if (activeCompanyId) {
+      employeeInclude.where = { company_id: activeCompanyId };
+    }
+
     const user = await User.findByPk(req.user.id, {
       include: [
-        {
-          model: Employee,
-          as: 'employee',
-          attributes: { exclude: ['created_at', 'updated_at', 'deleted_at'] },
-          required: false
-        },
+        employeeInclude,
         {
           model: Company,
           as: 'company',

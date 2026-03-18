@@ -14,7 +14,12 @@ const TYPE_TO_PREFERENCE = {
   wfh_rejected: 'notify_leave_approval',
   announcement_published: 'notify_memo_received',
   policy_published: 'notify_policy_update',
-  payslip_ready: 'notify_payslip_ready'
+  payslip_ready: 'notify_payslip_ready',
+  // e-Invoice notifications
+  invoice_submitted: 'notify_invoice_status',
+  invoice_validated: 'notify_invoice_status',
+  invoice_rejected: 'notify_invoice_status',
+  invoice_cancelled: 'notify_invoice_status'
   // team_member_joined has no toggle — always sent
 };
 

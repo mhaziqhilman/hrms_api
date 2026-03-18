@@ -74,6 +74,10 @@ const Attendance = sequelize.define('Attendance', {
   remarks: {
     type: DataTypes.TEXT,
     allowNull: true
+  },
+  todo_notes: {
+    type: DataTypes.TEXT,
+    allowNull: true
   }
 }, {
   tableName: 'attendance',

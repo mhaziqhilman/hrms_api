@@ -19,7 +19,9 @@ exports.getAllLeaves = async (req, res, next) => {
       employee_id,
       leave_type_id,
       start_date,
-      end_date
+      end_date,
+      sort,
+      order: sortOrder
     } = req.query;
 
     const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -71,7 +73,9 @@ exports.getAllLeaves = async (req, res, next) => {
       ],
       limit: parseInt(limit),
       offset: offset,
-      order: [['created_at', 'DESC']],
+      order: [sort && ['start_date', 'end_date', 'total_days', 'status', 'created_at'].includes(sort)
+        ? [sort, (sortOrder || 'asc').toUpperCase()]
+        : ['created_at', 'DESC']],
       distinct: true
     });
 

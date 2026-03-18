@@ -27,6 +27,9 @@ const AnnouncementCategory = require('./AnnouncementCategory');
 const Notification = require('./Notification');
 const Feedback = require('./Feedback');
 const AuditLog = require('./AuditLog');
+const Invoice = require('./Invoice');
+const InvoiceItem = require('./InvoiceItem');
+const InvoicePayment = require('./InvoicePayment');
 
 // Define associations
 
@@ -243,6 +246,28 @@ AuditLog.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 Company.hasMany(AuditLog, { foreignKey: 'company_id', as: 'audit_logs' });
 AuditLog.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
 
+// Invoice associations
+Company.hasMany(Invoice, { foreignKey: 'company_id', as: 'invoices' });
+Invoice.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+User.hasMany(Invoice, { foreignKey: 'created_by', as: 'created_invoices' });
+Invoice.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
+
+User.hasMany(Invoice, { foreignKey: 'approved_by', as: 'approved_invoices' });
+Invoice.belongsTo(User, { foreignKey: 'approved_by', as: 'approver' });
+
+User.hasMany(Invoice, { foreignKey: 'cancelled_by', as: 'cancelled_invoices' });
+Invoice.belongsTo(User, { foreignKey: 'cancelled_by', as: 'canceller' });
+
+Invoice.hasMany(InvoiceItem, { foreignKey: 'invoice_id', as: 'items', onDelete: 'CASCADE' });
+InvoiceItem.belongsTo(Invoice, { foreignKey: 'invoice_id', as: 'invoice' });
+
+Invoice.hasMany(InvoicePayment, { foreignKey: 'invoice_id', as: 'payments', onDelete: 'CASCADE' });
+InvoicePayment.belongsTo(Invoice, { foreignKey: 'invoice_id', as: 'invoice' });
+
+User.hasMany(InvoicePayment, { foreignKey: 'created_by', as: 'recorded_payments' });
+InvoicePayment.belongsTo(User, { foreignKey: 'created_by', as: 'recorder' });
+
 // Sync database
 const syncDatabase = async (options = {}) => {
   try {
@@ -284,5 +309,8 @@ module.exports = {
   Notification,
   Feedback,
   AuditLog,
+  Invoice,
+  InvoiceItem,
+  InvoicePayment,
   syncDatabase
 };

@@ -95,7 +95,9 @@ exports.getAllClaims = async (req, res) => {
       claim_type_id,
       status,
       start_date,
-      end_date
+      end_date,
+      sort,
+      order: sortOrder
     } = req.query;
 
     const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -155,7 +157,9 @@ exports.getAllClaims = async (req, res) => {
       ],
       limit: parseInt(limit),
       offset: offset,
-      order: [['date', 'DESC'], ['created_at', 'DESC']],
+      order: [sort && ['date', 'amount', 'status', 'created_at'].includes(sort)
+        ? [sort, (sortOrder || 'asc').toUpperCase()]
+        : ['date', 'DESC'], ['created_at', 'DESC']],
       distinct: true
     });
 

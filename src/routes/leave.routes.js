@@ -57,7 +57,9 @@ const queryValidation = [
   query('employee_id').optional().isInt().withMessage('Employee ID must be an integer'),
   query('leave_type_id').optional().isInt().withMessage('Leave type ID must be an integer'),
   query('start_date').optional().isISO8601().withMessage('Start date must be a valid date'),
-  query('end_date').optional().isISO8601().withMessage('End date must be a valid date')
+  query('end_date').optional().isISO8601().withMessage('End date must be a valid date'),
+  query('sort').optional().isIn(['start_date', 'end_date', 'total_days', 'status', 'created_at']).withMessage('Invalid sort field'),
+  query('order').optional().isIn(['asc', 'desc']).withMessage('Order must be asc or desc')
 ];
 
 /**
