@@ -29,6 +29,13 @@ router.get('/periods', adminAccess, statutoryReportsController.getAvailablePerio
 router.get('/ea/:year/employees', adminAccess, statutoryReportsController.getEmployeesForEA);
 
 /**
+ * @route   GET /api/statutory-reports/ea/:year/bulk-download
+ * @desc    Bulk download all EA Forms as ZIP (PDFs)
+ * @access  Admin, Super Admin
+ */
+router.get('/ea/:year/bulk-download', adminAccess, statutoryReportsController.bulkDownloadEAFormPDF);
+
+/**
  * @route   GET /api/statutory-reports/ea/:employee_id/:year
  * @desc    Get EA Form data for an employee
  * @access  Admin, Super Admin

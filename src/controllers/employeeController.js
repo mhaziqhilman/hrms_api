@@ -26,7 +26,9 @@ exports.getAllEmployees = async (req, res, next) => {
     const where = {};
 
     // Filter by active company
-    where.company_id = req.user.company_id;
+    if (req.user.company_id) {
+      where.company_id = req.user.company_id;
+    }
 
     // Apply filters - default to Active if no status specified
     where.employment_status = status || 'Active';

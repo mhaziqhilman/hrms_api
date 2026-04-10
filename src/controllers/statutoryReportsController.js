@@ -18,6 +18,7 @@ const { sendEAFormNotification } = require('../services/emailService');
 const libre = require('libreoffice-convert');
 const { promisify } = require('util');
 const convertAsync = promisify(libre.convert);
+const archiver = require('archiver');
 
 /**
  * Fetch company info for the current user.
@@ -1220,6 +1221,79 @@ exports.getEmployeesForEA = async (req, res, next) => {
     });
   } catch (error) {
     logger.error('Error fetching employees for EA:', error);
+    next(error);
+  }
+};
+
+/**
+ * Bulk download all EA Forms as a ZIP file containing individual PDFs
+ */
+exports.bulkDownloadEAFormPDF = async (req, res, next) => {
+  try {
+    const { year } = req.params;
+    const companyId = req.user.company_id;
+
+    // Get all employees with payroll data for the year
+    const payrollRecords = await Payroll.findAll({
+      where: {
+        year: parseInt(year),
+        status: { [Op.in]: ['Approved', 'Paid'] }
+      },
+      include: [{
+        model: Employee,
+        as: 'employee',
+        attributes: ['id', 'public_id', 'employee_id', 'full_name'],
+        where: { company_id: companyId },
+        required: true
+      }],
+      attributes: [[col('Payroll.employee_id'), 'employee_id']],
+      group: ['Payroll.employee_id', 'employee.id', 'employee.public_id', 'employee.employee_id', 'employee.full_name'],
+      raw: false
+    });
+
+    const employeesMap = new Map();
+    payrollRecords.forEach(record => {
+      if (!employeesMap.has(record.employee_id)) {
+        employeesMap.set(record.employee_id, record.employee);
+      }
+    });
+    const employees = Array.from(employeesMap.values());
+
+    if (employees.length === 0) {
+      return res.status(404).json({ success: false, message: 'No employees with payroll data found for this year' });
+    }
+
+    // Set response headers for ZIP download
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename=EA_Forms_${year}.zip`);
+
+    const archive = archiver('zip', { zlib: { level: 5 } });
+    archive.on('error', (err) => { throw err; });
+    archive.pipe(res);
+
+    // Generate PDF for each employee and append to ZIP
+    for (const emp of employees) {
+      try {
+        const data = await buildEAFormData(req.user.id, emp.public_id, year, companyId);
+        if (data.error) {
+          logger.warn(`Skipping EA form for employee ${emp.employee_id}: ${data.error}`);
+          continue;
+        }
+
+        const excelBuffer = await generateEAFormExcel(data);
+        const pdfBuffer = await convertAsync(excelBuffer, '.pdf', undefined);
+
+        const safeName = (emp.full_name || emp.employee_id).replace(/[^a-zA-Z0-9_\-\s]/g, '');
+        archive.append(pdfBuffer, { name: `EA_Form_${emp.employee_id}_${safeName}_${year}.pdf` });
+      } catch (empError) {
+        logger.warn(`Error generating EA form for employee ${emp.employee_id}:`, empError.message);
+      }
+    }
+
+    await archive.finalize();
+    logger.info(`Bulk EA Form PDF download completed for year ${year}, ${employees.length} employees`);
+  } catch (error) {
+    logger.error('Error in bulk EA Form PDF download:', error);
     next(error);
   }
 };

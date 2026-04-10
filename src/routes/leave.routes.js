@@ -101,7 +101,7 @@ router.get(
   '/balance/:employee_id',
   verifyToken,
   [
-    param('employee_id').isInt().withMessage('Employee ID must be an integer'),
+    param('employee_id').isUUID().withMessage('Invalid employee ID'),
     query('year').optional().isInt({ min: 2020, max: 2100 }).withMessage('Invalid year')
   ],
   validate,
