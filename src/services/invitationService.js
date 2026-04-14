@@ -89,7 +89,7 @@ const createInvitation = async (companyId, invitedByUserId, email, role = 'staff
   // Send invitation email
   try {
     const inviterName = inviter?.employee?.full_name || inviter?.email || 'Your colleague';
-    await sendInvitationEmail(email, inviterName, company.name, rawToken);
+    await sendInvitationEmail(email, inviterName, company.name, rawToken, companyId);
   } catch (emailError) {
     logger.error(`Failed to send invitation email to ${email}: ${emailError.message}`);
   }
@@ -170,7 +170,8 @@ const acceptInvitation = async (token, userId) => {
         welcomeUser.email,
         welcomeUser.name || invitation.email,
         linkedEmployee?.employee_id || null,
-        null
+        null,
+        invitation.company_id
       ).catch(err => logger.error(`Failed to send welcome email to ${welcomeUser.email}:`, err));
     }
   } catch (emailErr) {
@@ -280,7 +281,7 @@ const resendInvitation = async (invitationId, userId) => {
   // Send email
   try {
     const inviterName = inviter?.employee?.full_name || inviter?.email || 'Your colleague';
-    await sendInvitationEmail(invitation.email, inviterName, invitation.company.name, newToken);
+    await sendInvitationEmail(invitation.email, inviterName, invitation.company.name, newToken, invitation.company_id);
   } catch (emailError) {
     logger.error(`Failed to resend invitation email to ${invitation.email}: ${emailError.message}`);
   }

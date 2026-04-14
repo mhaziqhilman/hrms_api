@@ -20,7 +20,8 @@ const validate = (req, res, next) => {
 
 // Validation rules
 const applyLeaveValidation = [
-  body('employee_id').isInt().withMessage('Employee ID must be an integer'),
+  // Controller resolves employee_id as Employee.public_id (UUID), so accept any non-empty value.
+  body('employee_id').notEmpty().withMessage('Employee ID is required'),
   body('leave_type_id').isInt().withMessage('Leave type ID must be an integer'),
   body('start_date').isISO8601().withMessage('Start date must be a valid date'),
   body('end_date').isISO8601().withMessage('End date must be a valid date'),

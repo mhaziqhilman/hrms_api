@@ -290,7 +290,7 @@ const sendLeaveStatusNotification = async (email, employeeName, leaveType, statu
 /**
  * Send welcome email to new employee
  */
-const sendWelcomeEmail = async (email, employeeName, employeeId, tempPassword) => {
+const sendWelcomeEmail = async (email, employeeName, employeeId, tempPassword, companyId) => {
   const loginUrl = `${process.env.FRONTEND_URL}/auth/login`;
 
   const credentialsSection = tempPassword
@@ -320,7 +320,8 @@ const sendWelcomeEmail = async (email, employeeName, employeeId, tempPassword) =
   return await sendEmail({
     to: email,
     subject: 'Welcome to Nextura HRMS',
-    html
+    html,
+    companyId
   });
 };
 
@@ -357,7 +358,7 @@ const sendVerificationEmail = async (email, verificationToken, userName) => {
 /**
  * Send invitation email
  */
-const sendInvitationEmail = async (email, inviterName, companyName, invitationToken) => {
+const sendInvitationEmail = async (email, inviterName, companyName, invitationToken, companyId) => {
   const inviteUrl = `${process.env.FRONTEND_URL}/auth/accept-invitation?token=${invitationToken}`;
 
   const html = `
@@ -380,7 +381,8 @@ const sendInvitationEmail = async (email, inviterName, companyName, invitationTo
   return await sendEmail({
     to: email,
     subject: `You've been invited to join ${companyName} - Nextura HRMS`,
-    html
+    html,
+    companyId
   });
 };
 
