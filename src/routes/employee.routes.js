@@ -222,6 +222,23 @@ router.put(
 );
 
 /**
+ * @route   PATCH /api/employees/:id/wfh-flexible
+ * @desc    Toggle flexible WFH permission for an employee
+ * @access  Admin only
+ */
+router.patch(
+  '/:id/wfh-flexible',
+  verifyToken,
+  requireAdmin,
+  [
+    param('id').notEmpty().withMessage('ID is required'),
+    body('wfh_flexible').isBoolean().withMessage('wfh_flexible must be a boolean'),
+    validate
+  ],
+  employeeController.setWfhFlexible
+);
+
+/**
  * @route   DELETE /api/employees/:id
  * @desc    Soft delete employee (change status to Resigned/Terminated)
  * @access  Admin only

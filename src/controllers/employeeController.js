@@ -454,6 +454,47 @@ exports.updateEmployee = async (req, res, next) => {
 };
 
 /**
+ * Toggle flexible WFH permission for an employee (admin only).
+ * When true, the employee can clock in as WFH without a prior WFH application.
+ */
+exports.setWfhFlexible = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { wfh_flexible } = req.body;
+
+    const employee = await Employee.findOne({
+      where: { public_id: id, company_id: req.user.company_id }
+    });
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: 'Employee not found'
+      });
+    }
+
+    await employee.update({ wfh_flexible: !!wfh_flexible });
+
+    logger.info(`WFH-flexible set to ${!!wfh_flexible} for employee ${employee.public_id || employee.id}`, {
+      user_id: req.user.id
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        id: employee.id,
+        public_id: employee.public_id,
+        wfh_flexible: employee.wfh_flexible
+      },
+      message: `Flexible WFH ${wfh_flexible ? 'granted' : 'revoked'}`
+    });
+  } catch (error) {
+    logger.error('Error updating wfh_flexible:', error);
+    next(error);
+  }
+};
+
+/**
  * Soft delete employee (update status to Resigned/Terminated)
  */
 exports.deleteEmployee = async (req, res, next) => {

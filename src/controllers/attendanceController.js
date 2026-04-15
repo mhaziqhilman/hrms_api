@@ -73,8 +73,9 @@ exports.clockIn = async (req, res, next) => {
       });
     }
 
-    // If type is WFH, check if WFH is approved for today
-    if (type === 'WFH') {
+    // If type is WFH, require an approved WFH application — unless the employee
+    // has `wfh_flexible` turned on (admin-granted blanket permission to WFH).
+    if (type === 'WFH' && !employee.wfh_flexible) {
       const wfhApplication = await WFHApplication.findOne({
         where: {
           employee_id: employee.id,

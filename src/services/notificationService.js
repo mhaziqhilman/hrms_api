@@ -1,5 +1,6 @@
 const Notification = require('../models/Notification');
 const UserSettings = require('../models/UserSettings');
+const pushSender = require('./pushSender');
 const logger = require('../utils/logger');
 
 // Map notification types to the corresponding user_settings preference column
@@ -66,6 +67,12 @@ class NotificationService {
         data
       });
       logger.info(`Notification created: type=${type}, user=${userId}`);
+
+      // Fire-and-forget push (never blocks the request)
+      pushSender
+        .sendToUser(userId, { type, title, body: message, data })
+        .catch(err => logger.warn(`Push send failed: ${err.message}`));
+
       return notification;
     } catch (error) {
       logger.error('Failed to create notification:', error.message);
@@ -119,6 +126,12 @@ class NotificationService {
       }));
       const notifications = await Notification.bulkCreate(records);
       logger.info(`Bulk notifications created: type=${type}, count=${notifications.length}`);
+
+      // Fire-and-forget bulk push
+      pushSender
+        .sendToUsers(filteredUserIds, { type, title, body: message, data })
+        .catch(err => logger.warn(`Bulk push send failed: ${err.message}`));
+
       return notifications;
     } catch (error) {
       logger.error('Failed to create bulk notifications:', error.message);

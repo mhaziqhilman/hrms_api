@@ -6,7 +6,9 @@ const {
   getUnreadCount,
   markAsRead,
   markAllAsRead,
-  deleteNotification
+  deleteNotification,
+  registerDeviceToken,
+  unregisterDeviceToken
 } = require('../controllers/notificationController');
 
 // All routes require authentication
@@ -20,6 +22,12 @@ router.get('/unread-count', getUnreadCount);
 
 // PATCH /api/notifications/mark-all-read - Mark all as read
 router.patch('/mark-all-read', markAllAsRead);
+
+// POST /api/notifications/device-token - Register/refresh FCM/APNs token
+router.post('/device-token', registerDeviceToken);
+
+// DELETE /api/notifications/device-token - Unregister token on logout
+router.delete('/device-token', unregisterDeviceToken);
 
 // PATCH /api/notifications/:id/read - Mark single as read
 router.patch('/:id/read', markAsRead);

@@ -150,6 +150,13 @@ const Employee = sequelize.define('Employee', {
     allowNull: true,
     field: 'work_location'
   },
+  // If true, employee may clock in as WFH without a prior WFH application.
+  wfh_flexible: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+    field: 'wfh_flexible'
+  },
   // Banking Information
   bank_name: {
     type: DataTypes.STRING(100),

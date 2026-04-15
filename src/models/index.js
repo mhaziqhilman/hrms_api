@@ -30,6 +30,7 @@ const AuditLog = require('./AuditLog');
 const Invoice = require('./Invoice');
 const InvoiceItem = require('./InvoiceItem');
 const InvoicePayment = require('./InvoicePayment');
+const DeviceToken = require('./DeviceToken');
 
 // Define associations
 
@@ -268,6 +269,10 @@ InvoicePayment.belongsTo(Invoice, { foreignKey: 'invoice_id', as: 'invoice' });
 User.hasMany(InvoicePayment, { foreignKey: 'created_by', as: 'recorded_payments' });
 InvoicePayment.belongsTo(User, { foreignKey: 'created_by', as: 'recorder' });
 
+// User - DeviceToken (One-to-Many)
+User.hasMany(DeviceToken, { foreignKey: 'user_id', as: 'device_tokens', onDelete: 'CASCADE' });
+DeviceToken.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
 // Sync database
 const syncDatabase = async (options = {}) => {
   try {
@@ -312,5 +317,6 @@ module.exports = {
   Invoice,
   InvoiceItem,
   InvoicePayment,
+  DeviceToken,
   syncDatabase
 };

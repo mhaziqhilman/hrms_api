@@ -45,7 +45,7 @@ const invoiceRoutes = require('./routes/invoice.routes');
 // Initialize express app
 const app = express();
 
-// HTTPS enforcement (production only — Azure sets x-forwarded-proto)
+// HTTPS enforcement (production only — Render sets x-forwarded-proto)
 if (process.env.NODE_ENV === 'production') {
   app.use((req, res, next) => {
     if (req.headers['x-forwarded-proto'] !== 'https') {

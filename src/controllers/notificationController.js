@@ -1,5 +1,6 @@
 const { Op } = require('sequelize');
 const Notification = require('../models/Notification');
+const DeviceToken = require('../models/DeviceToken');
 const logger = require('../utils/logger');
 
 /**
@@ -176,10 +177,105 @@ const deleteNotification = async (req, res, next) => {
   }
 };
 
+/**
+ * Register or refresh a device token for push notifications
+ * POST /api/notifications/device-token
+ * Body: { token, platform, device_id?, device_model?, app_version? }
+ */
+const registerDeviceToken = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { token, platform, device_id, device_model, app_version } = req.body;
+
+    if (!token || !platform) {
+      return res.status(400).json({
+        success: false,
+        message: 'token and platform are required'
+      });
+    }
+
+    if (!['ios', 'android', 'web'].includes(platform)) {
+      return res.status(400).json({
+        success: false,
+        message: 'platform must be ios, android, or web'
+      });
+    }
+
+    const [record, created] = await DeviceToken.findOrCreate({
+      where: { token },
+      defaults: {
+        user_id: userId,
+        token,
+        platform,
+        device_id,
+        device_model,
+        app_version,
+        last_seen_at: new Date(),
+        is_active: true
+      }
+    });
+
+    if (!created) {
+      await record.update({
+        user_id: userId,
+        platform,
+        device_id: device_id ?? record.device_id,
+        device_model: device_model ?? record.device_model,
+        app_version: app_version ?? record.app_version,
+        last_seen_at: new Date(),
+        is_active: true
+      });
+    }
+
+    res.json({
+      success: true,
+      message: created ? 'Device token registered' : 'Device token refreshed',
+      data: { id: record.id }
+    });
+  } catch (error) {
+    logger.error('Error registering device token:', error);
+    next(error);
+  }
+};
+
+/**
+ * Unregister a device token (on logout)
+ * DELETE /api/notifications/device-token
+ * Body: { token }
+ */
+const unregisterDeviceToken = async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: 'token is required'
+      });
+    }
+
+    const deleted = await DeviceToken.destroy({
+      where: { token, user_id: userId }
+    });
+
+    res.json({
+      success: true,
+      message: deleted ? 'Device token unregistered' : 'Token not found',
+      data: { deleted }
+    });
+  } catch (error) {
+    logger.error('Error unregistering device token:', error);
+    next(error);
+  }
+};
+
 module.exports = {
   getNotifications,
   getUnreadCount,
   markAsRead,
   markAllAsRead,
-  deleteNotification
+  deleteNotification,
+  registerDeviceToken,
+  unregisterDeviceToken
 };
