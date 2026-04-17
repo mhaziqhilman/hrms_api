@@ -3,6 +3,9 @@ const Employee = require('../models/Employee');
 const User = require('../models/User');
 const Company = require('../models/Company');
 const YTDStatutory = require('../models/YTDStatutory');
+const Leave = require('../models/Leave');
+const LeaveType = require('../models/LeaveType');
+const PayRun = require('../models/PayRun');
 const { Op } = require('sequelize');
 const { sequelize } = require('../config/database');
 const logger = require('../utils/logger');
@@ -15,6 +18,20 @@ const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
+
+/**
+ * Helper: recalculate pay run totals if the payroll belongs to one.
+ * Safely no-ops if the payroll has no pay_run_id.
+ */
+async function syncPayRun(payroll, transaction = null) {
+  if (!payroll?.pay_run_id) return;
+  try {
+    const { recalculatePayRunTotals } = require('./payRunController');
+    await recalculatePayRunTotals(payroll.pay_run_id, transaction);
+  } catch (err) {
+    logger.error('Failed to sync pay run totals:', err);
+  }
+}
 
 /**
  * Get all payroll records with pagination and filtering
@@ -192,9 +209,9 @@ exports.calculatePayroll = async (req, res, next) => {
       });
     }
 
-    // Check if payroll already exists for this employee/month/year
+    // Check if an active (non-cancelled) payroll already exists for this employee/month/year
     const existing = await Payroll.findOne({
-      where: { employee_id: employee.id, year, month }
+      where: { employee_id: employee.id, year, month, status: { [Op.ne]: 'Cancelled' } }
     });
 
     if (existing) {
@@ -208,6 +225,32 @@ exports.calculatePayroll = async (req, res, next) => {
     // Calculate pay period
     const pay_period_start = new Date(year, month - 1, 1);
     const pay_period_end = new Date(year, month, 0);
+    const defaultPaymentDate = payment_date || new Date(year, month, 25);
+
+    // Find or create PayRun for this period so single calcs roll up under one run
+    let payRun = await PayRun.findOne({
+      where: { company_id: req.user.company_id, year, month },
+      transaction
+    });
+
+    if (!payRun) {
+      payRun = await PayRun.create({
+        company_id: req.user.company_id,
+        month,
+        year,
+        pay_period_start,
+        pay_period_end,
+        payment_date: defaultPaymentDate,
+        status: 'Draft',
+        created_by: req.user.id
+      }, { transaction });
+    } else if (payRun.status === 'Paid' || payRun.status === 'Cancelled') {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: `Cannot add to a pay run that is already ${payRun.status}`
+      });
+    }
 
     // Calculate gross salary
     const basic_salary = form_basic_salary != null ? parseFloat(form_basic_salary) : parseFloat(employee.basic_salary);
@@ -276,9 +319,10 @@ exports.calculatePayroll = async (req, res, next) => {
     // Create payroll record
     const payroll = await Payroll.create({
       employee_id: employee.id,
+      pay_run_id: payRun.id,
       pay_period_start,
       pay_period_end,
-      payment_date: payment_date || new Date(year, month, 25), // Default to 25th of next month
+      payment_date: payment_date || defaultPaymentDate,
       month,
       year,
       basic_salary,
@@ -309,10 +353,15 @@ exports.calculatePayroll = async (req, res, next) => {
     // Update or create YTD Statutory record
     await updateYTDStatutory(employee.id, year, month, statutory, gross_salary, net_salary, transaction);
 
+    // Recalculate PayRun totals now that this payroll is attached
+    const { recalculatePayRunTotals } = require('./payRunController');
+    await recalculatePayRunTotals(payRun.id, transaction);
+
     await transaction.commit();
 
     logger.info(`Payroll calculated for employee ${employee_id}, ${month}/${year}`, {
       payroll_id: payroll.id,
+      pay_run_id: payRun.id,
       processed_by: req.user.id
     });
 
@@ -442,6 +491,7 @@ exports.updatePayroll = async (req, res, next) => {
     }
 
     await payroll.update(updates, { transaction });
+    await syncPayRun(payroll, transaction);
     await transaction.commit();
 
     logger.info(`Payroll ${id} updated by user ${req.user.id}`);
@@ -489,6 +539,7 @@ exports.submitForApproval = async (req, res, next) => {
       submitted_by: req.user.id,
       submitted_at: new Date()
     });
+    await syncPayRun(payroll);
 
     logger.info(`Payroll ${id} submitted for approval by user ${req.user.id}`);
 
@@ -534,6 +585,7 @@ exports.approvePayroll = async (req, res, next) => {
       approved_by: req.user.id,
       approved_at: new Date()
     });
+    await syncPayRun(payroll);
 
     logger.info(`Payroll ${id} approved by user ${req.user.id}`);
 
@@ -585,6 +637,7 @@ exports.markAsPaid = async (req, res, next) => {
     }
 
     await payroll.update({ status: 'Paid' });
+    await syncPayRun(payroll);
 
     logger.info(`Payroll ${id} marked as paid by user ${req.user.id}`);
 
@@ -659,6 +712,7 @@ exports.deletePayroll = async (req, res, next) => {
     }
 
     await payroll.update({ status: 'Cancelled' });
+    await syncPayRun(payroll);
 
     logger.info(`Payroll ${id} cancelled by user ${req.user.id}`);
 
@@ -698,7 +752,9 @@ exports.permanentDeletePayroll = async (req, res, next) => {
       });
     }
 
+    const payRunId = payroll.pay_run_id;
     await payroll.destroy();
+    if (payRunId) await syncPayRun({ pay_run_id: payRunId });
 
     logger.info(`Payroll ${id} permanently deleted by user ${req.user.id}`);
 
@@ -1259,6 +1315,7 @@ exports.bulkSubmitForApproval = async (req, res, next) => {
       }
     }
 
+    const affectedPayRunIds = new Set();
     for (const payroll of payrolls) {
       try {
         if (payroll.status !== 'Draft') {
@@ -1266,10 +1323,15 @@ exports.bulkSubmitForApproval = async (req, res, next) => {
           continue;
         }
         await payroll.update({ status: 'Pending', submitted_by: req.user.id, submitted_at: new Date() });
+        if (payroll.pay_run_id) affectedPayRunIds.add(payroll.pay_run_id);
         results.push({ id: payroll.public_id, success: true, message: 'Submitted for approval' });
       } catch (error) {
         results.push({ id: payroll.public_id, success: false, message: error.message });
       }
+    }
+
+    for (const runId of affectedPayRunIds) {
+      await syncPayRun({ pay_run_id: runId });
     }
 
     const successCount = results.filter(r => r.success).length;
@@ -1315,6 +1377,7 @@ exports.bulkApprovePayroll = async (req, res, next) => {
       }
     }
 
+    const affectedPayRunIds = new Set();
     for (const payroll of payrolls) {
       try {
         if (payroll.status !== 'Pending') {
@@ -1322,10 +1385,15 @@ exports.bulkApprovePayroll = async (req, res, next) => {
           continue;
         }
         await payroll.update({ status: 'Approved', approved_by: req.user.id, approved_at: new Date() });
+        if (payroll.pay_run_id) affectedPayRunIds.add(payroll.pay_run_id);
         results.push({ id: payroll.public_id, success: true, message: 'Approved successfully' });
       } catch (error) {
         results.push({ id: payroll.public_id, success: false, message: error.message });
       }
+    }
+
+    for (const runId of affectedPayRunIds) {
+      await syncPayRun({ pay_run_id: runId });
     }
 
     const successCount = results.filter(r => r.success).length;
@@ -1371,6 +1439,7 @@ exports.bulkMarkAsPaid = async (req, res, next) => {
       }
     }
 
+    const affectedPayRunIds = new Set();
     for (const payroll of payrolls) {
       try {
         if (payroll.status !== 'Approved') {
@@ -1378,6 +1447,7 @@ exports.bulkMarkAsPaid = async (req, res, next) => {
           continue;
         }
         await payroll.update({ status: 'Paid' });
+        if (payroll.pay_run_id) affectedPayRunIds.add(payroll.pay_run_id);
         results.push({ id: payroll.public_id, success: true, message: 'Marked as paid' });
 
         // Send payslip notification email
@@ -1405,6 +1475,10 @@ exports.bulkMarkAsPaid = async (req, res, next) => {
       } catch (error) {
         results.push({ id: payroll.public_id, success: false, message: error.message });
       }
+    }
+
+    for (const runId of affectedPayRunIds) {
+      await syncPayRun({ pay_run_id: runId });
     }
 
     const successCount = results.filter(r => r.success).length;
@@ -1450,6 +1524,7 @@ exports.bulkCancelPayroll = async (req, res, next) => {
       }
     }
 
+    const affectedPayRunIds = new Set();
     for (const payroll of payrolls) {
       try {
         if (payroll.status === 'Paid') {
@@ -1461,10 +1536,15 @@ exports.bulkCancelPayroll = async (req, res, next) => {
           continue;
         }
         await payroll.update({ status: 'Cancelled' });
+        if (payroll.pay_run_id) affectedPayRunIds.add(payroll.pay_run_id);
         results.push({ id: payroll.public_id, success: true, message: 'Cancelled successfully' });
       } catch (error) {
         results.push({ id: payroll.public_id, success: false, message: error.message });
       }
+    }
+
+    for (const runId of affectedPayRunIds) {
+      await syncPayRun({ pay_run_id: runId });
     }
 
     const successCount = results.filter(r => r.success).length;
@@ -1510,17 +1590,24 @@ exports.bulkPermanentDeletePayroll = async (req, res, next) => {
       }
     }
 
+    const affectedPayRunIds = new Set();
     for (const payroll of payrolls) {
       try {
         if (payroll.status !== 'Cancelled') {
           results.push({ id: payroll.public_id, success: false, message: `Cannot delete: status is '${payroll.status}', expected 'Cancelled'` });
           continue;
         }
+        const payRunId = payroll.pay_run_id;
         await payroll.destroy();
+        if (payRunId) affectedPayRunIds.add(payRunId);
         results.push({ id: payroll.public_id, success: true, message: 'Permanently deleted' });
       } catch (error) {
         results.push({ id: payroll.public_id, success: false, message: error.message });
       }
+    }
+
+    for (const runId of affectedPayRunIds) {
+      await syncPayRun({ pay_run_id: runId });
     }
 
     const successCount = results.filter(r => r.success).length;
@@ -1535,6 +1622,473 @@ exports.bulkPermanentDeletePayroll = async (req, res, next) => {
     });
   } catch (error) {
     logger.error('Error bulk deleting payrolls:', error);
+    next(error);
+  }
+};
+
+/**
+ * Get eligible employees for a pay run (those without payroll for the given period)
+ * Also returns unpaid leave days within the period for each employee
+ */
+exports.getPayRunEligible = async (req, res, next) => {
+  try {
+    const { year, month } = req.query;
+
+    if (!year || !month) {
+      return res.status(400).json({
+        success: false,
+        message: 'Year and month are required'
+      });
+    }
+
+    const yearInt = parseInt(year);
+    const monthInt = parseInt(month);
+
+    // Get all active employees for this company
+    const employees = await Employee.findAll({
+      where: {
+        company_id: req.user.company_id,
+        employment_status: 'Active'
+      },
+      attributes: ['id', 'public_id', 'employee_id', 'full_name', 'department', 'position', 'basic_salary', 'bank_name', 'bank_account_no', 'join_date'],
+      order: [['full_name', 'ASC']]
+    });
+
+    // Get existing payrolls for this period
+    const existingPayrolls = await Payroll.findAll({
+      where: {
+        year: yearInt,
+        month: monthInt,
+        status: { [Op.notIn]: ['Cancelled'] }
+      },
+      include: [{
+        model: Employee,
+        as: 'employee',
+        where: { company_id: req.user.company_id },
+        attributes: []
+      }],
+      attributes: ['employee_id']
+    });
+    const existingEmployeeIds = new Set(existingPayrolls.map(p => p.employee_id));
+
+    // Get unpaid leave types
+    const unpaidLeaveTypes = await LeaveType.findAll({
+      where: {
+        is_paid: false,
+        is_active: true,
+        [Op.or]: [
+          { company_id: req.user.company_id },
+          { company_id: null }
+        ]
+      },
+      attributes: ['id']
+    });
+    const unpaidTypeIds = unpaidLeaveTypes.map(lt => lt.id);
+
+    // Calculate pay period date range
+    const periodStart = new Date(yearInt, monthInt - 1, 1);
+    const periodEnd = new Date(yearInt, monthInt, 0);
+
+    // Get unpaid leaves for all employees in this period
+    let unpaidLeaveMap = {};
+    if (unpaidTypeIds.length > 0) {
+      const unpaidLeaves = await Leave.findAll({
+        where: {
+          leave_type_id: { [Op.in]: unpaidTypeIds },
+          status: 'Approved',
+          start_date: { [Op.lte]: periodEnd },
+          end_date: { [Op.gte]: periodStart }
+        },
+        attributes: ['employee_id', 'total_days', 'start_date', 'end_date']
+      });
+
+      unpaidLeaves.forEach(leave => {
+        if (!unpaidLeaveMap[leave.employee_id]) {
+          unpaidLeaveMap[leave.employee_id] = 0;
+        }
+        unpaidLeaveMap[leave.employee_id] += parseFloat(leave.total_days);
+      });
+    }
+
+    // Build response
+    const result = employees.map(emp => ({
+      id: emp.id,
+      public_id: emp.public_id,
+      employee_id: emp.employee_id,
+      full_name: emp.full_name,
+      department: emp.department,
+      position: emp.position,
+      basic_salary: parseFloat(emp.basic_salary || 0),
+      bank_name: emp.bank_name,
+      bank_account_no: emp.bank_account_no,
+      join_date: emp.join_date,
+      has_existing_payroll: existingEmployeeIds.has(emp.id),
+      unpaid_leave_days: unpaidLeaveMap[emp.id] || 0,
+      unpaid_leave_deduction: unpaidLeaveMap[emp.id]
+        ? parseFloat(((parseFloat(emp.basic_salary || 0) / 26) * unpaidLeaveMap[emp.id]).toFixed(2))
+        : 0
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: {
+        employees: result,
+        period: { year: yearInt, month: monthInt },
+        summary: {
+          total_active: employees.length,
+          already_processed: existingEmployeeIds.size,
+          eligible: employees.length - existingEmployeeIds.size
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching pay run eligible employees:', error);
+    next(error);
+  }
+};
+
+/**
+ * Preview bulk payroll calculations without saving
+ * Returns statutory calculations for each employee
+ */
+exports.bulkPreview = async (req, res, next) => {
+  try {
+    const { year, month, employees: employeeInputs } = req.body;
+
+    if (!year || !month || !Array.isArray(employeeInputs) || employeeInputs.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Year, month, and employees array are required'
+      });
+    }
+
+    const rateOverrides = await getCompanyRates(req.user.company_id);
+    const results = [];
+    let totalGross = 0;
+    let totalDeductions = 0;
+    let totalNet = 0;
+
+    for (const input of employeeInputs) {
+      const employee = await Employee.findOne({
+        where: { public_id: input.employee_id, company_id: req.user.company_id, employment_status: 'Active' }
+      });
+
+      if (!employee) continue;
+
+      const basic_salary = input.basic_salary != null ? parseFloat(input.basic_salary) : parseFloat(employee.basic_salary);
+      const allowances = parseFloat(input.allowances || 0);
+      const overtime_pay = parseFloat(input.overtime_pay || 0);
+      const bonus = parseFloat(input.bonus || 0);
+      const commission = parseFloat(input.commission || 0);
+      const unpaid_leave_deduction = parseFloat(input.unpaid_leave_deduction || 0);
+      const other_deductions = parseFloat(input.other_deductions || 0);
+
+      const gross_salary = basic_salary + allowances + overtime_pay + bonus + commission;
+
+      // Fetch YTD data
+      const previousPayrolls = await Payroll.findAll({
+        where: {
+          employee_id: employee.id,
+          year,
+          month: { [Op.lt]: month },
+          status: { [Op.notIn]: ['Cancelled'] }
+        },
+        attributes: ['gross_salary', 'epf_employee', 'pcb_deduction', 'prior_ytd_gross', 'prior_ytd_epf', 'prior_ytd_pcb'],
+        raw: true
+      });
+
+      const ytdGross = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.gross_salary || 0), 0);
+      const ytdEpf = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.epf_employee || 0), 0);
+      const ytdPcbDeducted = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.pcb_deduction || 0), 0);
+
+      const prevPriorGross = Math.max(0, ...previousPayrolls.map(p => parseFloat(p.prior_ytd_gross || 0)));
+      const prevPriorEpf = Math.max(0, ...previousPayrolls.map(p => parseFloat(p.prior_ytd_epf || 0)));
+      const prevPriorPcb = Math.max(0, ...previousPayrolls.map(p => parseFloat(p.prior_ytd_pcb || 0)));
+
+      const statutory = calculateAllStatutory(gross_salary, {
+        rateOverrides,
+        employee: {
+          tax_category: employee.tax_category || 'KA',
+          number_of_children: employee.number_of_children || 0,
+          children_in_higher_education: employee.children_in_higher_education || 0,
+          disabled_children: employee.disabled_children || 0,
+          disabled_self: employee.disabled_self || false,
+          disabled_spouse: employee.disabled_spouse || false
+        },
+        ytd: {
+          gross: ytdGross + prevPriorGross,
+          epf: ytdEpf + prevPriorEpf,
+          pcbDeducted: ytdPcbDeducted + prevPriorPcb,
+          zakat: 0
+        },
+        currentMonth: month,
+        additionalRemuneration: bonus + commission
+      });
+
+      const total_deductions = statutory.totalEmployeeDeduction + unpaid_leave_deduction + other_deductions;
+      const net_salary = gross_salary - total_deductions;
+
+      totalGross += gross_salary;
+      totalDeductions += total_deductions;
+      totalNet += net_salary;
+
+      results.push({
+        employee_id: input.employee_id,
+        employee_name: employee.full_name,
+        department: employee.department,
+        basic_salary,
+        allowances,
+        overtime_pay,
+        bonus,
+        commission,
+        gross_salary,
+        epf_employee: statutory.epf.employee,
+        epf_employer: statutory.epf.employer,
+        socso_employee: statutory.socso.employee,
+        socso_employer: statutory.socso.employer,
+        eis_employee: statutory.eis.employee,
+        eis_employer: statutory.eis.employer,
+        pcb_deduction: statutory.pcb,
+        unpaid_leave_deduction,
+        other_deductions,
+        total_deductions,
+        net_salary
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        period: { year, month },
+        employees: results,
+        totals: {
+          employee_count: results.length,
+          total_gross: parseFloat(totalGross.toFixed(2)),
+          total_deductions: parseFloat(totalDeductions.toFixed(2)),
+          total_net: parseFloat(totalNet.toFixed(2))
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('Error generating bulk payroll preview:', error);
+    next(error);
+  }
+};
+
+/**
+ * Bulk calculate and create payroll records for multiple employees in a single transaction
+ */
+exports.bulkCalculatePayroll = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const { year, month, payment_date, employees: employeeInputs } = req.body;
+
+    if (!year || !month || !Array.isArray(employeeInputs) || employeeInputs.length === 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'Year, month, and employees array are required'
+      });
+    }
+
+    const rateOverrides = await getCompanyRates(req.user.company_id);
+    const pay_period_start = new Date(year, month - 1, 1);
+    const pay_period_end = new Date(year, month, 0);
+    const defaultPaymentDate = payment_date || new Date(year, month, 25);
+
+    // Find or create PayRun for this period (reuse existing to support incremental additions)
+    let payRun = await PayRun.findOne({
+      where: { company_id: req.user.company_id, year, month },
+      transaction
+    });
+
+    if (!payRun) {
+      payRun = await PayRun.create({
+        company_id: req.user.company_id,
+        month,
+        year,
+        pay_period_start,
+        pay_period_end,
+        payment_date: defaultPaymentDate,
+        status: 'Draft',
+        created_by: req.user.id
+      }, { transaction });
+    } else if (payRun.status === 'Paid' || payRun.status === 'Cancelled') {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: `Cannot add to a pay run that is already ${payRun.status}`
+      });
+    }
+
+    const results = [];
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const input of employeeInputs) {
+      try {
+        const employee = await Employee.findOne({
+          where: { public_id: input.employee_id, company_id: req.user.company_id },
+          transaction
+        });
+
+        if (!employee) {
+          results.push({ employee_id: input.employee_id, success: false, message: 'Employee not found' });
+          failCount++;
+          continue;
+        }
+
+        if (employee.employment_status !== 'Active') {
+          results.push({ employee_id: input.employee_id, success: false, message: 'Employee is not active' });
+          failCount++;
+          continue;
+        }
+
+        // Check for active (non-cancelled) duplicate
+        const existing = await Payroll.findOne({
+          where: { employee_id: employee.id, year, month, status: { [Op.ne]: 'Cancelled' } },
+          transaction
+        });
+        if (existing) {
+          results.push({ employee_id: input.employee_id, success: false, message: 'Payroll already exists for this period' });
+          failCount++;
+          continue;
+        }
+
+        const basic_salary = input.basic_salary != null ? parseFloat(input.basic_salary) : parseFloat(employee.basic_salary);
+        const allowances = parseFloat(input.allowances || 0);
+        const overtime_pay = parseFloat(input.overtime_pay || 0);
+        const bonus = parseFloat(input.bonus || 0);
+        const commission = parseFloat(input.commission || 0);
+        const unpaid_leave_deduction = parseFloat(input.unpaid_leave_deduction || 0);
+        const other_deductions = parseFloat(input.other_deductions || 0);
+
+        const gross_salary = basic_salary + allowances + overtime_pay + bonus + commission;
+
+        // YTD data
+        const previousPayrolls = await Payroll.findAll({
+          where: {
+            employee_id: employee.id,
+            year,
+            month: { [Op.lt]: month },
+            status: { [Op.notIn]: ['Cancelled'] }
+          },
+          attributes: ['gross_salary', 'epf_employee', 'pcb_deduction', 'prior_ytd_gross', 'prior_ytd_epf', 'prior_ytd_pcb'],
+          raw: true,
+          transaction
+        });
+
+        const ytdGross = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.gross_salary || 0), 0);
+        const ytdEpf = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.epf_employee || 0), 0);
+        const ytdPcbDeducted = previousPayrolls.reduce((sum, p) => sum + parseFloat(p.pcb_deduction || 0), 0);
+        const prevPriorGross = Math.max(0, ...previousPayrolls.map(p => parseFloat(p.prior_ytd_gross || 0)));
+        const prevPriorEpf = Math.max(0, ...previousPayrolls.map(p => parseFloat(p.prior_ytd_epf || 0)));
+        const prevPriorPcb = Math.max(0, ...previousPayrolls.map(p => parseFloat(p.prior_ytd_pcb || 0)));
+        const effectivePriorGross = Math.max(prevPriorGross, parseFloat(input.prior_ytd_gross || 0));
+        const effectivePriorEpf = Math.max(prevPriorEpf, parseFloat(input.prior_ytd_epf || 0));
+        const effectivePriorPcb = Math.max(prevPriorPcb, parseFloat(input.prior_ytd_pcb || 0));
+
+        const statutory = calculateAllStatutory(gross_salary, {
+          rateOverrides,
+          employee: {
+            tax_category: employee.tax_category || 'KA',
+            number_of_children: employee.number_of_children || 0,
+            children_in_higher_education: employee.children_in_higher_education || 0,
+            disabled_children: employee.disabled_children || 0,
+            disabled_self: employee.disabled_self || false,
+            disabled_spouse: employee.disabled_spouse || false
+          },
+          ytd: {
+            gross: ytdGross + effectivePriorGross,
+            epf: ytdEpf + effectivePriorEpf,
+            pcbDeducted: ytdPcbDeducted + effectivePriorPcb,
+            zakat: 0
+          },
+          currentMonth: month,
+          additionalRemuneration: bonus + commission
+        });
+
+        const total_deductions = statutory.totalEmployeeDeduction + unpaid_leave_deduction + other_deductions;
+        const net_salary = gross_salary - total_deductions;
+
+        const payroll = await Payroll.create({
+          employee_id: employee.id,
+          pay_run_id: payRun.id,
+          pay_period_start,
+          pay_period_end,
+          payment_date: defaultPaymentDate,
+          month,
+          year,
+          basic_salary,
+          allowances,
+          overtime_pay,
+          bonus,
+          commission,
+          gross_salary,
+          epf_employee: statutory.epf.employee,
+          epf_employer: statutory.epf.employer,
+          socso_employee: statutory.socso.employee,
+          socso_employer: statutory.socso.employer,
+          eis_employee: statutory.eis.employee,
+          eis_employer: statutory.eis.employer,
+          pcb_deduction: statutory.pcb,
+          unpaid_leave_deduction,
+          other_deductions,
+          prior_ytd_gross: parseFloat(input.prior_ytd_gross || 0),
+          prior_ytd_epf: parseFloat(input.prior_ytd_epf || 0),
+          prior_ytd_pcb: parseFloat(input.prior_ytd_pcb || 0),
+          total_deductions,
+          net_salary,
+          status: 'Draft',
+          notes: input.notes || '',
+          processed_by: req.user.id
+        }, { transaction });
+
+        await updateYTDStatutory(employee.id, year, month, statutory, gross_salary, net_salary, transaction);
+
+        results.push({
+          employee_id: input.employee_id,
+          employee_name: employee.full_name,
+          payroll_id: payroll.public_id,
+          success: true,
+          net_salary
+        });
+        successCount++;
+      } catch (empError) {
+        logger.error(`Error processing payroll for employee ${input.employee_id}:`, empError);
+        results.push({ employee_id: input.employee_id, success: false, message: empError.message });
+        failCount++;
+      }
+    }
+
+    if (failCount > 0 && successCount === 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: 'All payroll calculations failed',
+        data: { successCount, failCount, results }
+      });
+    }
+
+    // Update pay run totals from created payrolls
+    const { recalculatePayRunTotals } = require('./payRunController');
+    await recalculatePayRunTotals(payRun.id, transaction);
+
+    await transaction.commit();
+
+    logger.info(`Bulk payroll created: ${successCount} succeeded, ${failCount} failed for ${month}/${year}`, {
+      processed_by: req.user.id
+    });
+
+    res.status(201).json({
+      success: true,
+      message: `Pay run completed: ${successCount} payrolls created${failCount > 0 ? `, ${failCount} failed` : ''}`,
+      data: { successCount, failCount, results, pay_run_id: payRun.public_id }
+    });
+  } catch (error) {
+    await transaction.rollback();
+    logger.error('Error in bulk payroll calculation:', error);
     next(error);
   }
 };

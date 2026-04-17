@@ -161,6 +161,22 @@ router.get(
 );
 
 /**
+ * @route   GET /api/employees/check-id
+ * @desc    Check if employee_id already exists in the company
+ * @access  Admin only
+ */
+router.get(
+  '/check-id',
+  verifyToken,
+  requireAdmin,
+  [
+    query('employee_id').notEmpty().withMessage('employee_id is required'),
+    validate
+  ],
+  employeeController.checkEmployeeId
+);
+
+/**
  * @route   GET /api/employees/:id/ytd
  * @desc    Get employee YTD statutory summary
  * @access  Admin, Manager, Staff (own profile only)

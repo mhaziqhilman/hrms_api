@@ -16,6 +16,7 @@ const logger = require('./utils/logger');
 const authRoutes = require('./routes/auth.routes');
 const employeeRoutes = require('./routes/employee.routes');
 const payrollRoutes = require('./routes/payroll.routes');
+const payRunRoutes = require('./routes/payrun.routes');
 const leaveRoutes = require('./routes/leave.routes');
 const attendanceRoutes = require('./routes/attendance.routes');
 const claimRoutes = require('./routes/claim.routes');
@@ -168,6 +169,7 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/employees', employeeRoutes);
 app.use('/api/payroll', payrollRoutes);
+app.use('/api/payruns', payRunRoutes);
 app.use('/api/leaves', leaveRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/claims', claimRoutes);
@@ -213,9 +215,10 @@ const startServer = async () => {
     // Sync database models (in development only)
     if (process.env.NODE_ENV === 'development' && process.env.DB_SYNC === 'true') {
       // Sync Company table first to resolve circular FK: users.company_id → companies, companies.owner_id → users
-      const { Company, Invitation } = require('./models');
+      const { Company, Invitation, PayRun } = require('./models');
       await Company.sync({ alter: true });
       await Invitation.sync({ alter: true });
+      await PayRun.sync({ alter: true });
       await sequelize.sync({ alter: true });
       logger.info('Database models synchronized');
     }

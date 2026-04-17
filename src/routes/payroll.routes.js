@@ -99,9 +99,63 @@ const bulkIdsValidation = [
     .isArray({ min: 1 })
     .withMessage('payroll_ids must be a non-empty array'),
   body('payroll_ids.*')
-    .isInt()
-    .withMessage('Each payroll ID must be an integer')
+    .isUUID()
+    .withMessage('Each payroll ID must be a valid UUID')
 ];
+
+// Pay Run validation rules
+const bulkCalculateValidation = [
+  body('year').isInt({ min: 2020, max: 2100 }).withMessage('Year must be a valid integer'),
+  body('month').isInt({ min: 1, max: 12 }).withMessage('Month must be between 1 and 12'),
+  body('payment_date').optional().isISO8601().withMessage('Payment date must be a valid date'),
+  body('employees').isArray({ min: 1 }).withMessage('Employees array is required and must not be empty'),
+  body('employees.*.employee_id').isString().notEmpty().withMessage('Employee ID is required for each entry')
+];
+
+/**
+ * @route   GET /api/payroll/payrun-eligible
+ * @desc    Get eligible employees for a pay run with unpaid leave data
+ * @access  Private (Manager+)
+ */
+router.get(
+  '/payrun-eligible',
+  verifyToken,
+  requireManager,
+  [
+    query('year').isInt({ min: 2020, max: 2100 }).withMessage('Year is required'),
+    query('month').isInt({ min: 1, max: 12 }).withMessage('Month is required')
+  ],
+  validate,
+  payrollController.getPayRunEligible
+);
+
+/**
+ * @route   POST /api/payroll/bulk-preview
+ * @desc    Preview bulk payroll calculations without saving
+ * @access  Private (Manager+)
+ */
+router.post(
+  '/bulk-preview',
+  verifyToken,
+  requireManager,
+  bulkCalculateValidation,
+  validate,
+  payrollController.bulkPreview
+);
+
+/**
+ * @route   POST /api/payroll/bulk-calculate
+ * @desc    Bulk calculate and create payroll records
+ * @access  Private (Manager+)
+ */
+router.post(
+  '/bulk-calculate',
+  verifyToken,
+  requireManager,
+  bulkCalculateValidation,
+  validate,
+  payrollController.bulkCalculatePayroll
+);
 
 /**
  * @route   POST /api/payroll/bulk-submit

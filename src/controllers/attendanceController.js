@@ -15,12 +15,25 @@ function getTodayDate() {
 }
 
 /**
+ * Get yesterday's date string (YYYY-MM-DD) in the app timezone
+ */
+function getYesterdayDate() {
+  const now = getNowInTimezone();
+  now.setDate(now.getDate() - 1);
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+/**
  * Get current time as a Date object with timezone-aware hour/minute for comparisons
  */
 function getNowInTimezone() {
   const nowStr = new Date().toLocaleString('en-US', { timeZone: APP_TIMEZONE });
   return new Date(nowStr);
 }
+
+// Cross-day clock-out cutoff: if the user clocked in yesterday and didn't clock
+// out, they may still clock out the following day until this hour (local time).
+const CROSS_DAY_CLOCK_OUT_CUTOFF_HOUR = 7;
 
 /**
  * Clock in
@@ -174,14 +187,40 @@ exports.clockOut = async (req, res, next) => {
     }
 
     const today = getTodayDate();
+    const localNow = getNowInTimezone();
 
     // Find today's attendance record
-    const attendance = await Attendance.findOne({
+    let attendance = await Attendance.findOne({
       where: {
         employee_id: employee.id,
         date: today
       }
     });
+
+    // Cross-day clock-out: if no record today, allow clocking out an open
+    // session from yesterday as long as we're before the cutoff hour (7 AM).
+    let crossDay = false;
+    if (!attendance) {
+      const yesterday = getYesterdayDate();
+      const openYesterday = await Attendance.findOne({
+        where: {
+          employee_id: employee.id,
+          date: yesterday,
+          clock_out_time: null
+        }
+      });
+
+      if (openYesterday) {
+        if (localNow.getHours() >= CROSS_DAY_CLOCK_OUT_CUTOFF_HOUR) {
+          return res.status(409).json({
+            success: false,
+            message: `Clock-out window has passed. You must clock out before ${CROSS_DAY_CLOCK_OUT_CUTOFF_HOUR}:00 AM the next day.`
+          });
+        }
+        attendance = openYesterday;
+        crossDay = true;
+      }
+    }
 
     if (!attendance) {
       return res.status(404).json({
@@ -204,11 +243,12 @@ exports.clockOut = async (req, res, next) => {
     const clockInTime = new Date(attendance.clock_in_time);
     const totalHours = ((clockOutTime - clockInTime) / (1000 * 60 * 60)).toFixed(2);
 
-    // Check if early leave (assuming office hours end at 6:00 PM) — use local timezone
-    const localNow = getNowInTimezone();
+    // Check if early leave (office hours end at 6:00 PM) — only meaningful when
+    // clocking out on the same day; skip for cross-day sessions since those
+    // have already worked past end-of-day.
     const officeEndTime = new Date(localNow);
     officeEndTime.setHours(18, 0, 0, 0);
-    const is_early_leave = attendance.type === 'Office' && localNow < officeEndTime;
+    const is_early_leave = !crossDay && attendance.type === 'Office' && localNow < officeEndTime;
 
     // Calculate early leave minutes if early leave
     let early_leave_minutes = null;

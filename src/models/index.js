@@ -31,6 +31,7 @@ const Invoice = require('./Invoice');
 const InvoiceItem = require('./InvoiceItem');
 const InvoicePayment = require('./InvoicePayment');
 const DeviceToken = require('./DeviceToken');
+const PayRun = require('./PayRun');
 
 // Define associations
 
@@ -78,6 +79,18 @@ YTDStatutory.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
 // Employee - Payroll (One-to-Many)
 Employee.hasMany(Payroll, { foreignKey: 'employee_id', as: 'payrolls' });
 Payroll.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
+
+// PayRun - Company (Many-to-One)
+Company.hasMany(PayRun, { foreignKey: 'company_id', as: 'pay_runs' });
+PayRun.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+// PayRun - Payroll (One-to-Many)
+PayRun.hasMany(Payroll, { foreignKey: 'pay_run_id', as: 'payrolls' });
+Payroll.belongsTo(PayRun, { foreignKey: 'pay_run_id', as: 'pay_run' });
+
+// PayRun - User (created_by)
+User.hasMany(PayRun, { foreignKey: 'created_by', as: 'created_pay_runs' });
+PayRun.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
 
 // User - Payroll (processed_by and approved_by)
 User.hasMany(Payroll, { foreignKey: 'processed_by', as: 'processed_payrolls' });
@@ -318,5 +331,6 @@ module.exports = {
   InvoiceItem,
   InvoicePayment,
   DeviceToken,
+  PayRun,
   syncDatabase
 };

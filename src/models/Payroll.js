@@ -21,6 +21,10 @@ const Payroll = sequelize.define('Payroll', {
       key: 'id'
     }
   },
+  pay_run_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
   pay_period_start: {
     type: DataTypes.DATEONLY,
     allowNull: false
@@ -175,8 +179,10 @@ const Payroll = sequelize.define('Payroll', {
   updatedAt: 'updated_at',
   indexes: [
     {
+      name: 'payroll_active_employee_year_month',
       unique: true,
-      fields: ['employee_id', 'year', 'month']
+      fields: ['employee_id', 'year', 'month'],
+      where: { status: { [require('sequelize').Op.ne]: 'Cancelled' } }
     },
     {
       fields: ['year', 'month']

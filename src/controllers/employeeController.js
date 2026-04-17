@@ -239,6 +239,38 @@ exports.getEmployeeById = async (req, res, next) => {
 };
 
 /**
+ * Check if employee_id already exists within the company
+ */
+exports.checkEmployeeId = async (req, res, next) => {
+  try {
+    const { employee_id } = req.query;
+    const exclude = req.query.exclude; // public_id to exclude (for edit mode)
+
+    if (!employee_id) {
+      return res.status(400).json({ success: false, message: 'employee_id is required' });
+    }
+
+    const where = {
+      company_id: req.user.company_id,
+      employee_id
+    };
+
+    if (exclude) {
+      where.public_id = { [Op.ne]: exclude };
+    }
+
+    const existing = await Employee.findOne({ where, attributes: ['id'] });
+
+    return res.json({
+      success: true,
+      data: { exists: !!existing }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Create new employee
  */
 exports.createEmployee = async (req, res, next) => {
