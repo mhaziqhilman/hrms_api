@@ -42,6 +42,9 @@ const notificationRoutes = require('./routes/notification.routes');
 const feedbackRoutes = require('./routes/feedback.routes');
 const auditLogRoutes = require('./routes/auditLog.routes');
 const invoiceRoutes = require('./routes/invoice.routes');
+const projectRoutes = require('./routes/project.routes');
+const billRoutes = require('./routes/bill.routes');
+const financeRoutes = require('./routes/finance.routes');
 
 // Initialize express app
 const app = express();
@@ -197,6 +200,9 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/audit-logs', auditLogRoutes);
 
 app.use('/api/invoices', invoiceRoutes);
+app.use('/api/projects', projectRoutes);
+app.use('/api/bills', billRoutes);
+app.use('/api/finance', financeRoutes);
 
 // 404 handler
 app.use(notFound);
@@ -216,10 +222,13 @@ const startServer = async () => {
     // Sync database models (in development only)
     if (process.env.NODE_ENV === 'development' && process.env.DB_SYNC === 'true') {
       // Sync Company table first to resolve circular FK: users.company_id → companies, companies.owner_id → users
-      const { Company, Invitation, PayRun } = require('./models');
+      const { Company, Invitation, PayRun, Project, Bill } = require('./models');
       await Company.sync({ alter: true });
       await Invitation.sync({ alter: true });
       await PayRun.sync({ alter: true });
+      // Project must exist before Invoice/Claim/Bill (which reference it)
+      await Project.sync({ alter: true });
+      await Bill.sync({ alter: true });
       await sequelize.sync({ alter: true });
       logger.info('Database models synchronized');
     }

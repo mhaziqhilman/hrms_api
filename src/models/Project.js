@@ -54,6 +54,32 @@ const Project = sequelize.define('Project', {
     type: DataTypes.STRING(3),
     defaultValue: 'MYR'
   },
+  // Purchase Order details (when project originates from a client PO)
+  po_number: {
+    type: DataTypes.STRING(60),
+    allowNull: true
+  },
+  po_date: {
+    type: DataTypes.DATEONLY,
+    allowNull: true
+  },
+  po_value: {
+    type: DataTypes.DECIMAL(12, 2),
+    allowNull: true
+  },
+  po_currency: {
+    type: DataTypes.STRING(3),
+    allowNull: true,
+    defaultValue: 'MYR'
+  },
+  po_duration_months: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  po_document_url: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
   manager_id: {
     type: DataTypes.INTEGER,
     allowNull: true,

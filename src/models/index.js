@@ -32,6 +32,10 @@ const InvoiceItem = require('./InvoiceItem');
 const InvoicePayment = require('./InvoicePayment');
 const DeviceToken = require('./DeviceToken');
 const PayRun = require('./PayRun');
+const Project = require('./Project');
+const Bill = require('./Bill');
+const BillItem = require('./BillItem');
+const BillPayment = require('./BillPayment');
 
 // Define associations
 
@@ -286,6 +290,44 @@ InvoicePayment.belongsTo(User, { foreignKey: 'created_by', as: 'recorder' });
 User.hasMany(DeviceToken, { foreignKey: 'user_id', as: 'device_tokens', onDelete: 'CASCADE' });
 DeviceToken.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
+// Project associations
+Company.hasMany(Project, { foreignKey: 'company_id', as: 'projects' });
+Project.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+User.hasMany(Project, { foreignKey: 'manager_id', as: 'managed_projects' });
+Project.belongsTo(User, { foreignKey: 'manager_id', as: 'manager' });
+
+User.hasMany(Project, { foreignKey: 'created_by', as: 'created_projects' });
+Project.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
+
+Project.hasMany(Invoice, { foreignKey: 'project_id', as: 'invoices' });
+Invoice.belongsTo(Project, { foreignKey: 'project_id', as: 'project' });
+
+Project.hasMany(Claim, { foreignKey: 'project_id', as: 'claims' });
+Claim.belongsTo(Project, { foreignKey: 'project_id', as: 'project' });
+
+// Bill associations
+Company.hasMany(Bill, { foreignKey: 'company_id', as: 'bills' });
+Bill.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+Project.hasMany(Bill, { foreignKey: 'project_id', as: 'bills' });
+Bill.belongsTo(Project, { foreignKey: 'project_id', as: 'project' });
+
+User.hasMany(Bill, { foreignKey: 'created_by', as: 'created_bills' });
+Bill.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
+
+User.hasMany(Bill, { foreignKey: 'approved_by', as: 'approved_bills' });
+Bill.belongsTo(User, { foreignKey: 'approved_by', as: 'approver' });
+
+Bill.hasMany(BillItem, { foreignKey: 'bill_id', as: 'items', onDelete: 'CASCADE' });
+BillItem.belongsTo(Bill, { foreignKey: 'bill_id', as: 'bill' });
+
+Bill.hasMany(BillPayment, { foreignKey: 'bill_id', as: 'payments', onDelete: 'CASCADE' });
+BillPayment.belongsTo(Bill, { foreignKey: 'bill_id', as: 'bill' });
+
+User.hasMany(BillPayment, { foreignKey: 'created_by', as: 'recorded_bill_payments' });
+BillPayment.belongsTo(User, { foreignKey: 'created_by', as: 'recorder' });
+
 // Sync database
 const syncDatabase = async (options = {}) => {
   try {
@@ -332,5 +374,9 @@ module.exports = {
   InvoicePayment,
   DeviceToken,
   PayRun,
+  Project,
+  Bill,
+  BillItem,
+  BillPayment,
   syncDatabase
 };

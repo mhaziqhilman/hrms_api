@@ -18,6 +18,11 @@ const Invoice = sequelize.define('Invoice', {
     allowNull: false,
     references: { model: 'companies', key: 'id' }
   },
+  project_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: { model: 'projects', key: 'id' }
+  },
   invoice_number: {
     type: DataTypes.STRING(30),
     allowNull: false
@@ -236,7 +241,8 @@ const Invoice = sequelize.define('Invoice', {
     { fields: ['company_id', 'status'] },
     { unique: true, fields: ['company_id', 'invoice_number'] },
     { fields: ['company_id', 'invoice_date'] },
-    { fields: ['source_type', 'source_id'] }
+    { fields: ['source_type', 'source_id'] },
+    { fields: ['project_id'] }
   ]
 });
 

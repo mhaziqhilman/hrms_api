@@ -29,6 +29,14 @@ const Claim = sequelize.define('Claim', {
       key: 'id'
     }
   },
+  project_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'projects',
+      key: 'id'
+    }
+  },
   date: {
     type: DataTypes.DATEONLY,
     allowNull: false

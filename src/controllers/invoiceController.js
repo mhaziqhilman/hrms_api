@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { Invoice, InvoiceItem, InvoicePayment, Company, User, Payroll, Claim } = require('../models');
+const { Invoice, InvoiceItem, InvoicePayment, Company, User, Payroll, Claim, Project } = require('../models');
 const invoiceService = require('../services/invoiceService');
 const lhdnService = require('../services/lhdnService');
 const invoicePdfService = require('../services/invoicePdfService');
@@ -76,7 +76,7 @@ const getAllInvoices = async (req, res, next) => {
     const companyId = req.user.company_id;
     const {
       page = 1, limit = 20,
-      status, invoice_type, is_self_billed,
+      status, invoice_type, is_self_billed, project_id,
       search, date_from, date_to,
       sort = 'created_at', order = 'DESC'
     } = req.query;
@@ -91,6 +91,9 @@ const getAllInvoices = async (req, res, next) => {
     }
     if (is_self_billed !== undefined) {
       where.is_self_billed = is_self_billed === 'true';
+    }
+    if (project_id) {
+      where.project_id = project_id;
     }
     if (search) {
       where[Op.or] = [
@@ -113,7 +116,8 @@ const getAllInvoices = async (req, res, next) => {
     const { count, rows } = await Invoice.findAndCountAll({
       where,
       include: [
-        { model: User, as: 'creator', attributes: ['id', 'email'] }
+        { model: User, as: 'creator', attributes: ['id', 'email'] },
+        { model: Project, as: 'project', attributes: ['id', 'public_id', 'code', 'name', 'po_number'] }
       ],
       order: [[sortField, sortOrder]],
       limit: parseInt(limit),
@@ -150,7 +154,8 @@ const getInvoiceById = async (req, res, next) => {
         { model: InvoicePayment, as: 'payments', include: [{ model: User, as: 'recorder', attributes: ['id', 'email'] }] },
         { model: User, as: 'creator', attributes: ['id', 'email'] },
         { model: User, as: 'approver', attributes: ['id', 'email'] },
-        { model: User, as: 'canceller', attributes: ['id', 'email'] }
+        { model: User, as: 'canceller', attributes: ['id', 'email'] },
+        { model: Project, as: 'project', attributes: ['id', 'public_id', 'code', 'name', 'client_name', 'po_number'] }
       ]
     });
 

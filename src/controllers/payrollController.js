@@ -1235,8 +1235,8 @@ exports.getMyPayslips = async (req, res, next) => {
       }]
     });
 
-    // Calculate YTD summary
-    const currentYear = new Date().getFullYear();
+    // Calculate YTD summary for the selected year (or current year if not specified)
+    const ytdYear = year ? parseInt(year) : new Date().getFullYear();
     const ytdData = await Payroll.findAll({
       attributes: [
         [sequelize.fn('SUM', sequelize.col('gross_salary')), 'total_gross'],
@@ -1248,7 +1248,7 @@ exports.getMyPayslips = async (req, res, next) => {
       ],
       where: {
         employee_id: employeeId,
-        year: currentYear,
+        year: ytdYear,
         status: { [Op.in]: ['Approved', 'Paid'] }
       },
       raw: true
@@ -1266,7 +1266,7 @@ exports.getMyPayslips = async (req, res, next) => {
       data: {
         payslips: rows,
         ytd_summary: {
-          year: currentYear,
+          year: ytdYear,
           total_gross: parseFloat(ytdSummary.total_gross || 0),
           total_net: parseFloat(ytdSummary.total_net || 0),
           total_epf: parseFloat(ytdSummary.total_epf || 0),
