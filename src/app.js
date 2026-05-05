@@ -49,6 +49,7 @@ const financeRoutes = require('./routes/finance.routes');
 // Initialize express app
 const app = express();
 
+<<<<<<< HEAD
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -57,6 +58,11 @@ app.get('/api/health', (req, res) => {
     env: process.env.NODE_ENV,
   });
 });
+=======
+// Trust first proxy (Nginx/Render/Netlify) so req.ip and X-Forwarded-* headers work correctly.
+// Required for express-rate-limit to key off real client IP, and for HTTPS redirect below.
+app.set('trust proxy', 1);
+>>>>>>> 541d9bc (Enhance express app configuration by trusting proxy for accurate client IP handling)
 
 // HTTPS enforcement (production only — Render sets x-forwarded-proto)
 if (process.env.NODE_ENV === 'production') {
