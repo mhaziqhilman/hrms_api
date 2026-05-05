@@ -104,6 +104,52 @@ const getAdminDashboard = async (companyId) => {
 
   const payrollStatus = payrollStatusCheck?.status || 'Not Started';
 
+  // 3b. Payroll trend — last 6 months net salary
+  const trendMonths = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(currentYear, currentMonth - 1 - i, 1);
+    trendMonths.push({ year: d.getFullYear(), month: d.getMonth() + 1 });
+  }
+
+  const trendRows = await Payroll.findAll({
+    attributes: [
+      'year',
+      'month',
+      [fn('SUM', col('gross_salary')), 'total_gross'],
+      [fn('SUM', literal('epf_employee + socso_employee + eis_employee')), 'total_statutory'],
+      [fn('SUM', col('pcb_deduction')), 'total_pcb'],
+      [fn('SUM', col('net_salary')), 'total_net']
+    ],
+    where: {
+      [Op.or]: trendMonths.map(t => ({ year: t.year, month: t.month })),
+      status: { [Op.in]: ['Approved', 'Paid'] }
+    },
+    include: [{ model: Employee, as: 'employee', where: { company_id: companyId }, attributes: [], required: true }],
+    group: ['Payroll.year', 'Payroll.month'],
+    raw: true
+  });
+
+  const monthShort = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const trendMap = new Map(trendRows.map(r => [`${r.year}-${r.month}`, {
+    gross: parseFloat(r.total_gross) || 0,
+    statutory: parseFloat(r.total_statutory) || 0,
+    pcb: parseFloat(r.total_pcb) || 0,
+    net: parseFloat(r.total_net) || 0
+  }]));
+  const payrollTrend = trendMonths.map((t, i) => {
+    const row = trendMap.get(`${t.year}-${t.month}`) || { gross: 0, statutory: 0, pcb: 0, net: 0 };
+    return {
+      year: t.year,
+      month: t.month,
+      label: monthShort[t.month],
+      total: row.net,
+      gross: row.gross,
+      statutory: row.statutory,
+      pcb: row.pcb,
+      isCurrent: i === trendMonths.length - 1
+    };
+  });
+
   // 4. Claims pending payment (approved but not paid)
   const claimsPendingPayment = await Claim.findAll({
     where: {
@@ -260,6 +306,7 @@ const getAdminDashboard = async (companyId) => {
       totalPCB: parseFloat(payrollSummary?.total_pcb || 0),
       totalNetSalary: parseFloat(payrollSummary?.total_net || 0)
     },
+    payrollTrend,
     claimsPendingPayment: claimsPendingPayment.map(c => ({
       id: c.id,
       employee: c.employee?.full_name || 'Unknown',
