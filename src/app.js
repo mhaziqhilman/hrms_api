@@ -49,6 +49,15 @@ const financeRoutes = require('./routes/finance.routes');
 // Initialize express app
 const app = express();
 
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    env: process.env.NODE_ENV,
+  });
+});
+
 // HTTPS enforcement (production only — Render sets x-forwarded-proto)
 if (process.env.NODE_ENV === 'production') {
   app.use((req, res, next) => {

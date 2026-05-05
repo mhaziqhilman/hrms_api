@@ -17,7 +17,7 @@ function getFirebaseApp() {
   initAttempted = true;
 
   try {
-    const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
+    const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
     if (serviceAccountJson) {
       const creds = JSON.parse(serviceAccountJson);
       firebaseApp = admin.initializeApp({

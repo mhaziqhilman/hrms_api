@@ -44,3 +44,4 @@ coverage/
 # Database
 *.db
 *.sqlite
+secrets/
