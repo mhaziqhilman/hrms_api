@@ -6,8 +6,10 @@ const Claim = require('../models/Claim');
 const Leave = require('../models/Leave');
 const supabaseStorage = require('./supabaseStorageService');
 
-// Reusable include for uploader with employee name
-const uploaderInclude = {
+// Reusable include for uploader with employee name.
+// Employee join is scoped to the file's company so a user with
+// employee records in multiple companies doesn't duplicate file rows.
+const buildUploaderInclude = (companyId) => ({
   model: User,
   as: 'uploader',
   attributes: ['id', 'email'],
@@ -15,9 +17,10 @@ const uploaderInclude = {
     model: Employee,
     as: 'employee',
     attributes: ['full_name'],
-    required: false
+    required: false,
+    where: companyId ? { company_id: companyId } : undefined
   }]
-};
+});
 
 class FileService {
   /**
@@ -88,7 +91,7 @@ class FileService {
 
       // Include uploader info when requested
       if (includeUploader) {
-        queryOptions.include = [uploaderInclude];
+        queryOptions.include = [buildUploaderInclude(filters.company_id)];
       }
 
       const { count, rows } = await File.findAndCountAll(queryOptions);
@@ -266,7 +269,7 @@ class FileService {
       // Recent activity (last 10 uploads with uploader info)
       const recentActivity = await File.findAll({
         where: whereActive,
-        include: [uploaderInclude],
+        include: [buildUploaderInclude(companyId)],
         order: [['uploaded_at', 'DESC']],
         limit: 10
       });
@@ -347,7 +350,7 @@ class FileService {
 
       const { count, rows } = await File.findAndCountAll({
         where: whereClause,
-        include: [uploaderInclude],
+        include: [buildUploaderInclude(companyId)],
         limit: parseInt(limit),
         offset,
         order: [[sortColumn, sortOrder]]

@@ -11,6 +11,7 @@ const {
   Claim,
   ClaimType,
   Memo,
+  PublicHoliday,
   User
 } = require('../models');
 
@@ -686,6 +687,37 @@ const getStaffDashboard = async (companyId, userId) => {
     raw: true
   });
 
+  // 7. Next upcoming public holiday (only if within 30 days)
+  const HOLIDAY_WINDOW_DAYS = 30;
+  const todayDate = new Date(`${today}T00:00:00`);
+  const windowEnd = new Date(todayDate);
+  windowEnd.setDate(windowEnd.getDate() + HOLIDAY_WINDOW_DAYS);
+  const windowEndStr = `${windowEnd.getFullYear()}-${String(windowEnd.getMonth() + 1).padStart(2, '0')}-${String(windowEnd.getDate()).padStart(2, '0')}`;
+
+  const upcomingHoliday = await PublicHoliday.findOne({
+    where: {
+      company_id: companyId,
+      date: { [Op.between]: [today, windowEndStr] }
+    },
+    order: [['date', 'ASC']],
+    attributes: ['id', 'name', 'date', 'description'],
+    raw: true
+  });
+
+  let nextPublicHoliday = null;
+  if (upcomingHoliday) {
+    const hDate = new Date(`${upcomingHoliday.date}T00:00:00`);
+    const daysAway = Math.round((hDate.getTime() - todayDate.getTime()) / 86400000);
+    nextPublicHoliday = {
+      id: upcomingHoliday.id,
+      name: upcomingHoliday.name,
+      date: upcomingHoliday.date,
+      description: upcomingHoliday.description || null,
+      daysAway,
+      weekday: hDate.toLocaleDateString('en-US', { weekday: 'long' })
+    };
+  }
+
   return {
     todayAttendance: todayAttendance ? {
       isClockedIn: !!todayAttendance.clock_in_time && !todayAttendance.clock_out_time,
@@ -723,7 +755,8 @@ const getStaffDashboard = async (companyId, userId) => {
       date: m.published_at,
       urgent: m.priority === 'Urgent' || m.priority === 'High',
       read: false
-    }))
+    })),
+    nextPublicHoliday
   };
 };
 
@@ -733,7 +766,8 @@ const getEmptyStaffDashboard = () => ({
   attendanceHistory: [],
   myClaims: [],
   upcomingLeaves: [],
-  recentMemos: []
+  recentMemos: [],
+  nextPublicHoliday: null
 });
 
 module.exports = {
