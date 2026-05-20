@@ -393,8 +393,9 @@ exports.deleteFile = async (req, res) => {
     const { id } = req.params;
     const file = await fileService.getFileById(id);
 
-    // Check permission
-    if (req.user.role === 'staff' && file.uploaded_by !== req.user.id) {
+    // Check permission - only admins can delete files they don't own;
+    // staff and managers are restricted to their own uploads.
+    if (!['super_admin', 'admin'].includes(req.user.role) && file.uploaded_by !== req.user.id) {
       return res.status(403).json({
         success: false,
         message: 'You do not have permission to delete this file'
@@ -456,8 +457,9 @@ exports.bulkDeleteFiles = async (req, res) => {
       try {
         const file = await fileService.getFileById(fileId);
 
-        // Check permission
-        if (req.user.role === 'staff' && file.uploaded_by !== req.user.id) {
+        // Check permission - only admins can delete files they don't own;
+        // staff and managers are restricted to their own uploads.
+        if (!['super_admin', 'admin'].includes(req.user.role) && file.uploaded_by !== req.user.id) {
           results.push({ id: fileId, success: false, message: 'Permission denied' });
           continue;
         }
