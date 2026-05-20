@@ -96,6 +96,9 @@ exports.getAllClaims = async (req, res) => {
       status,
       start_date,
       end_date,
+      min_amount,
+      max_amount,
+      search,
       sort,
       order: sortOrder
     } = req.query;
@@ -112,7 +115,9 @@ exports.getAllClaims = async (req, res) => {
       if (!employee) {
         return res.status(200).json({
           success: true,
-          data: { claims: [], pagination: { total: 0, currentPage: 1, limit: parseInt(limit), totalPages: 0 } }
+          data: [],
+          pagination: { total: 0, page: 1, limit: parseInt(limit), totalPages: 0 },
+          status_counts: { All: 0, Pending: 0, Manager_Approved: 0, Finance_Approved: 0, Paid: 0, Rejected: 0 }
         });
       }
       whereClause.employee_id = employee.id;
@@ -129,39 +134,72 @@ exports.getAllClaims = async (req, res) => {
       if (end_date) whereClause.date[Op.lte] = end_date;
     }
 
+    if (min_amount !== undefined || max_amount !== undefined) {
+      whereClause.amount = {};
+      if (min_amount !== undefined && min_amount !== '') whereClause.amount[Op.gte] = parseFloat(min_amount);
+      if (max_amount !== undefined && max_amount !== '') whereClause.amount[Op.lte] = parseFloat(max_amount);
+    }
+
+    // Search: claim description OR employee full_name OR claim type name
+    const employeeInclude = {
+      model: Employee,
+      as: 'employee',
+      attributes: ['id', 'full_name', 'employee_id', 'department', 'position'],
+      where: { company_id: req.user.company_id },
+      required: true
+    };
+    const claimTypeInclude = {
+      model: ClaimType,
+      as: 'claimType',
+      attributes: ['id', 'name', 'description']
+    };
+
+    if (search && search.trim()) {
+      const term = `%${search.trim()}%`;
+      whereClause[Op.or] = [
+        { description: { [Op.iLike]: term } },
+        { '$employee.full_name$': { [Op.iLike]: term } },
+        { '$claimType.name$': { [Op.iLike]: term } }
+      ];
+    }
+
     const { count, rows } = await Claim.findAndCountAll({
       where: whereClause,
       include: [
-        {
-          model: Employee,
-          as: 'employee',
-          attributes: ['id', 'full_name', 'employee_id', 'department', 'position'],
-          where: { company_id: req.user.company_id },
-          required: true
-        },
-        {
-          model: ClaimType,
-          as: 'claimType',
-          attributes: ['id', 'name', 'description']
-        },
-        {
-          model: User,
-          as: 'managerApprover',
-          attributes: ['id', 'email', 'role']
-        },
-        {
-          model: User,
-          as: 'financeApprover',
-          attributes: ['id', 'email', 'role']
-        }
+        employeeInclude,
+        claimTypeInclude,
+        { model: User, as: 'managerApprover', attributes: ['id', 'email', 'role'] },
+        { model: User, as: 'financeApprover', attributes: ['id', 'email', 'role'] }
       ],
       limit: parseInt(limit),
       offset: offset,
       order: [sort && ['date', 'amount', 'status', 'created_at'].includes(sort)
         ? [sort, (sortOrder || 'asc').toUpperCase()]
         : ['date', 'DESC'], ['created_at', 'DESC']],
-      distinct: true
+      distinct: true,
+      subQuery: false
     });
+
+    // Status counts across the FULL filtered set (ignores `status` filter so tab badges stay accurate)
+    const countsWhere = { ...whereClause };
+    delete countsWhere.status;
+
+    const countRows = await Claim.findAll({
+      where: countsWhere,
+      include: [
+        { model: Employee, as: 'employee', attributes: [], where: { company_id: req.user.company_id }, required: true },
+        { model: ClaimType, as: 'claimType', attributes: [] }
+      ],
+      attributes: ['status'],
+      raw: true,
+      subQuery: false
+    });
+
+    const status_counts = { All: 0, Pending: 0, Manager_Approved: 0, Finance_Approved: 0, Paid: 0, Rejected: 0 };
+    for (const r of countRows) {
+      status_counts.All++;
+      if (status_counts[r.status] !== undefined) status_counts[r.status]++;
+    }
 
     res.json({
       success: true,
@@ -171,7 +209,8 @@ exports.getAllClaims = async (req, res) => {
         page: parseInt(page),
         limit: parseInt(limit),
         totalPages: Math.ceil(count / parseInt(limit))
-      }
+      },
+      status_counts
     });
   } catch (error) {
     console.error('Error fetching claims:', error);

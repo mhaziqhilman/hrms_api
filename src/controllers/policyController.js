@@ -25,8 +25,18 @@ exports.createPolicy = async (req, res) => {
       parent_policy_id
     } = req.body;
 
-    // Check if policy_code already exists
-    const existingPolicy = await Policy.findOne({ where: { policy_code } });
+    const companyId = req.user.company_id;
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'No active company on this session'
+      });
+    }
+
+    // Check if policy_code already exists within this company
+    const existingPolicy = await Policy.findOne({
+      where: { policy_code, company_id: companyId }
+    });
     if (existingPolicy) {
       return res.status(400).json({
         success: false,
@@ -43,6 +53,7 @@ exports.createPolicy = async (req, res) => {
       version: version || '1.0',
       status: status || 'Draft',
       author_id: req.user.id,
+      company_id: companyId,
       effective_from,
       review_date,
       expires_at,
@@ -58,7 +69,14 @@ exports.createPolicy = async (req, res) => {
         {
           model: User,
           as: 'author',
-          attributes: ['id', 'email', 'full_name']
+          attributes: ['id', 'email', 'role'],
+          include: [{
+            model: Employee,
+            as: 'employee',
+            attributes: ['full_name', 'position', 'department', 'photo_url'],
+            where: { company_id: req.user.company_id },
+            required: false
+          }]
         }
       ]
     });
@@ -93,8 +111,16 @@ exports.getAllPolicies = async (req, res) => {
 
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
-    // Build where clause
-    const whereClause = {};
+    const companyId = req.user.company_id;
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'No active company on this session'
+      });
+    }
+
+    // Build where clause — always scoped to the caller's active company
+    const whereClause = { company_id: companyId };
 
     // Filter by status
     if (status) {
@@ -143,12 +169,26 @@ exports.getAllPolicies = async (req, res) => {
         {
           model: User,
           as: 'author',
-          attributes: ['id', 'email', 'full_name']
+          attributes: ['id', 'email', 'role'],
+          include: [{
+            model: Employee,
+            as: 'employee',
+            attributes: ['full_name', 'position', 'department', 'photo_url'],
+            where: { company_id: req.user.company_id },
+            required: false
+          }]
         },
         {
           model: User,
           as: 'approver',
-          attributes: ['id', 'email', 'full_name']
+          attributes: ['id', 'email', 'role'],
+          include: [{
+            model: Employee,
+            as: 'employee',
+            attributes: ['full_name', 'position', 'department', 'photo_url'],
+            where: { company_id: req.user.company_id },
+            required: false
+          }]
         },
         {
           model: Policy,
@@ -191,17 +231,31 @@ exports.getPolicyById = async (req, res) => {
     const { id } = req.params;
 
     const policy = await Policy.findOne({
-      where: { public_id: id },
+      where: { public_id: id, company_id: req.user.company_id },
       include: [
         {
           model: User,
           as: 'author',
-          attributes: ['id', 'email', 'full_name']
+          attributes: ['id', 'email', 'role'],
+          include: [{
+            model: Employee,
+            as: 'employee',
+            attributes: ['full_name', 'position', 'department', 'photo_url'],
+            where: { company_id: req.user.company_id },
+            required: false
+          }]
         },
         {
           model: User,
           as: 'approver',
-          attributes: ['id', 'email', 'full_name']
+          attributes: ['id', 'email', 'role'],
+          include: [{
+            model: Employee,
+            as: 'employee',
+            attributes: ['full_name', 'position', 'department', 'photo_url'],
+            where: { company_id: req.user.company_id },
+            required: false
+          }]
         },
         {
           model: Policy,
@@ -248,7 +302,7 @@ exports.getPolicyById = async (req, res) => {
     // Create or update acknowledgment record for staff
     if (req.user.role === 'staff') {
       const employee = await Employee.findOne({
-        where: { user_id: req.user.id }
+        where: { user_id: req.user.id, company_id: req.user.company_id }
       });
 
       if (employee) {
@@ -301,7 +355,9 @@ exports.updatePolicy = async (req, res) => {
       tags
     } = req.body;
 
-    const policy = await Policy.findOne({ where: { public_id: id } });
+    const policy = await Policy.findOne({
+      where: { public_id: id, company_id: req.user.company_id }
+    });
 
     if (!policy) {
       return res.status(404).json({
@@ -318,9 +374,11 @@ exports.updatePolicy = async (req, res) => {
       });
     }
 
-    // Check if policy_code is being changed and if it already exists
+    // Check if policy_code is being changed and if it already exists (within company)
     if (policy_code && policy_code !== policy.policy_code) {
-      const existingPolicy = await Policy.findOne({ where: { policy_code } });
+      const existingPolicy = await Policy.findOne({
+        where: { policy_code, company_id: req.user.company_id }
+      });
       if (existingPolicy) {
         return res.status(400).json({
           success: false,
@@ -351,12 +409,26 @@ exports.updatePolicy = async (req, res) => {
         {
           model: User,
           as: 'author',
-          attributes: ['id', 'email', 'full_name']
+          attributes: ['id', 'email', 'role'],
+          include: [{
+            model: Employee,
+            as: 'employee',
+            attributes: ['full_name', 'position', 'department', 'photo_url'],
+            where: { company_id: req.user.company_id },
+            required: false
+          }]
         },
         {
           model: User,
           as: 'approver',
-          attributes: ['id', 'email', 'full_name']
+          attributes: ['id', 'email', 'role'],
+          include: [{
+            model: Employee,
+            as: 'employee',
+            attributes: ['full_name', 'position', 'department', 'photo_url'],
+            where: { company_id: req.user.company_id },
+            required: false
+          }]
         }
       ]
     });
@@ -381,7 +453,9 @@ exports.deletePolicy = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const policy = await Policy.findOne({ where: { public_id: id } });
+    const policy = await Policy.findOne({
+      where: { public_id: id, company_id: req.user.company_id }
+    });
 
     if (!policy) {
       return res.status(404).json({
@@ -419,7 +493,9 @@ exports.approvePolicy = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const policy = await Policy.findOne({ where: { public_id: id } });
+    const policy = await Policy.findOne({
+      where: { public_id: id, company_id: req.user.company_id }
+    });
 
     if (!policy) {
       return res.status(404).json({
@@ -447,12 +523,26 @@ exports.approvePolicy = async (req, res) => {
         {
           model: User,
           as: 'author',
-          attributes: ['id', 'email', 'full_name']
+          attributes: ['id', 'email', 'role'],
+          include: [{
+            model: Employee,
+            as: 'employee',
+            attributes: ['full_name', 'position', 'department', 'photo_url'],
+            where: { company_id: req.user.company_id },
+            required: false
+          }]
         },
         {
           model: User,
           as: 'approver',
-          attributes: ['id', 'email', 'full_name']
+          attributes: ['id', 'email', 'role'],
+          include: [{
+            model: Employee,
+            as: 'employee',
+            attributes: ['full_name', 'position', 'department', 'photo_url'],
+            where: { company_id: req.user.company_id },
+            required: false
+          }]
         }
       ]
     });
@@ -478,7 +568,9 @@ exports.acknowledgePolicy = async (req, res) => {
     const { id } = req.params;
     const { comments } = req.body;
 
-    const policy = await Policy.findOne({ where: { public_id: id } });
+    const policy = await Policy.findOne({
+      where: { public_id: id, company_id: req.user.company_id }
+    });
 
     if (!policy) {
       return res.status(404).json({
@@ -496,7 +588,7 @@ exports.acknowledgePolicy = async (req, res) => {
 
     // Get employee
     const employee = await Employee.findOne({
-      where: { user_id: req.user.id }
+      where: { user_id: req.user.id, company_id: req.user.company_id }
     });
 
     if (!employee) {
@@ -575,7 +667,7 @@ exports.getPolicyStatistics = async (req, res) => {
     const { id } = req.params;
 
     const policy = await Policy.findOne({
-      where: { public_id: id },
+      where: { public_id: id, company_id: req.user.company_id },
       include: [
         {
           model: PolicyAcknowledgment,
@@ -609,7 +701,9 @@ exports.getPolicyStatistics = async (req, res) => {
     // Calculate statistics
     const totalViews = policy.acknowledgments.length;
     const totalAcknowledgments = policy.acknowledgments.filter(a => a.acknowledged_at).length;
-    const totalEmployees = await Employee.count({ where: { employment_status: 'Active' } });
+    const totalEmployees = await Employee.count({
+      where: { employment_status: 'Active', company_id: req.user.company_id }
+    });
 
     const viewPercentage = totalEmployees > 0 ? ((totalViews / totalEmployees) * 100).toFixed(2) : 0;
     const acknowledgmentPercentage = totalEmployees > 0 ? ((totalAcknowledgments / totalEmployees) * 100).toFixed(2) : 0;
@@ -653,13 +747,14 @@ exports.getPolicyCategories = async (req, res) => {
       'Other'
     ];
 
-    // Count policies in each category
+    // Count policies in each category (scoped to active company)
     const categoryCounts = await Promise.all(
       categories.map(async (category) => {
         const count = await Policy.count({
           where: {
             category,
-            status: 'Active'
+            status: 'Active',
+            company_id: req.user.company_id
           }
         });
         return { category, count };

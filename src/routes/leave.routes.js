@@ -53,9 +53,9 @@ const idParamValidation = [
 
 const queryValidation = [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
-  query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
+  query('limit').optional().isInt({ min: 1, max: 1000 }).withMessage('Limit must be between 1 and 1000'),
   query('status').optional().isIn(['Pending', 'Approved', 'Rejected', 'Cancelled']).withMessage('Invalid status'),
-  query('employee_id').optional().isInt().withMessage('Employee ID must be an integer'),
+  query('employee_id').optional().isUUID().withMessage('Employee ID must be a valid UUID'),
   query('leave_type_id').optional().isInt().withMessage('Leave type ID must be an integer'),
   query('start_date').optional().isISO8601().withMessage('Start date must be a valid date'),
   query('end_date').optional().isISO8601().withMessage('End date must be a valid date'),

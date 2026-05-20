@@ -199,6 +199,10 @@ MemoReadReceipt.belongsTo(Memo, { foreignKey: 'memo_id', as: 'memo' });
 Employee.hasMany(MemoReadReceipt, { foreignKey: 'employee_id', as: 'memo_read_receipts' });
 MemoReadReceipt.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
 
+// Policy - Company (multi-tenancy)
+Company.hasMany(Policy, { foreignKey: 'company_id', as: 'policies' });
+Policy.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
 // Policy - User (author and approver)
 User.hasMany(Policy, { foreignKey: 'author_id', as: 'authored_policies' });
 Policy.belongsTo(User, { foreignKey: 'author_id', as: 'author' });

@@ -53,10 +53,10 @@ const createMemoValidation = [
     .optional()
     .isArray().withMessage('Target employee IDs must be an array'),
   body('published_at')
-    .optional()
+    .optional({ nullable: true })
     .isISO8601().withMessage('Published at must be a valid date'),
   body('expires_at')
-    .optional()
+    .optional({ nullable: true })
     .isISO8601().withMessage('Expires at must be a valid date'),
   body('requires_acknowledgment')
     .optional()
@@ -100,7 +100,7 @@ const updateMemoValidation = [
     .optional()
     .isArray().withMessage('Target employee IDs must be an array'),
   body('expires_at')
-    .optional()
+    .optional({ nullable: true })
     .isISO8601().withMessage('Expires at must be a valid date'),
   body('requires_acknowledgment')
     .optional()
@@ -189,6 +189,17 @@ router.get(
 );
 
 /**
+ * @route   GET /api/memos/stats/this-week
+ * @desc    Get this-week stats (posts count + total reach)
+ * @access  Private (All authenticated users)
+ */
+router.get(
+  '/stats/this-week',
+  verifyToken,
+  memoController.getThisWeekStats
+);
+
+/**
  * @route   POST /api/memos/:id/toggle-pin
  * @desc    Pin or unpin an announcement
  * @access  Private (Admin)
@@ -265,6 +276,19 @@ router.get(
   idParamValidation,
   validate,
   memoController.getMemoStatistics
+);
+
+/**
+ * @route   POST /api/memos/:id/remind
+ * @desc    Send an acknowledgment reminder to pending employees
+ * @access  Private (Admin, Author)
+ */
+router.post(
+  '/:id/remind',
+  verifyToken,
+  idParamValidation,
+  validate,
+  memoController.remindPending
 );
 
 module.exports = router;

@@ -16,8 +16,16 @@ const Policy = sequelize.define('Policy', {
   policy_code: {
     type: DataTypes.STRING(50),
     allowNull: false,
-    unique: true,
     field: 'policy_code'
+  },
+  company_id: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    references: {
+      model: 'companies',
+      key: 'id'
+    },
+    field: 'company_id'
   },
   title: {
     type: DataTypes.STRING(200),
@@ -129,9 +137,13 @@ const Policy = sequelize.define('Policy', {
   updatedAt: 'updated_at',
   indexes: [
     {
-      name: 'idx_policy_code',
+      name: 'idx_policy_code_company',
       unique: true,
-      fields: ['policy_code']
+      fields: ['policy_code', 'company_id']
+    },
+    {
+      name: 'idx_policy_company',
+      fields: ['company_id']
     },
     {
       name: 'idx_policy_status',

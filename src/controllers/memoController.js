@@ -52,6 +52,47 @@ async function resolveAuthorPhotos(memos) {
   }
 }
 
+// Resolve the full targeted-audience employee roster for a memo.
+// Mirrors the audience rules used everywhere else (All / Department / Position / Specific).
+async function getTargetedEmployees(memo, company_id) {
+  const attributes = ['id', 'user_id', 'full_name', 'department', 'position'];
+
+  if (memo.target_audience === 'Department') {
+    return Employee.findAll({
+      where: {
+        company_id,
+        employment_status: 'Active',
+        department: { [Op.in]: memo.target_departments || [] }
+      },
+      attributes
+    });
+  }
+
+  if (memo.target_audience === 'Position') {
+    return Employee.findAll({
+      where: {
+        company_id,
+        employment_status: 'Active',
+        position: { [Op.in]: memo.target_positions || [] }
+      },
+      attributes
+    });
+  }
+
+  if (memo.target_audience === 'Specific') {
+    return Employee.findAll({
+      where: { company_id, id: { [Op.in]: memo.target_employee_ids || [] } },
+      attributes
+    });
+  }
+
+  // 'All' (default)
+  return Employee.findAll({
+    where: { company_id, employment_status: 'Active' },
+    attributes
+  });
+}
+
 // Common includes for author info + category
 const getStandardIncludes = (company_id) => [
   {
@@ -309,6 +350,50 @@ exports.getAllMemos = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching announcements',
+      error: error.message
+    });
+  }
+};
+
+// Get this-week stats: count of posts published + sum of view_count
+exports.getThisWeekStats = async (req, res) => {
+  try {
+    const company_id = req.user.company_id;
+
+    const now = new Date();
+    const startOfWeek = new Date(now);
+    const day = startOfWeek.getDay();
+    const diffToMonday = (day + 6) % 7;
+    startOfWeek.setDate(startOfWeek.getDate() - diffToMonday);
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    const whereClause = {
+      company_id,
+      status: 'Published',
+      published_at: { [Op.gte]: startOfWeek }
+    };
+
+    const posts = await Memo.count({ where: whereClause });
+
+    const reachRow = await Memo.findOne({
+      where: whereClause,
+      attributes: [[fn('COALESCE', fn('SUM', sequelize.col('view_count')), 0), 'total_reach']],
+      raw: true
+    });
+
+    res.json({
+      success: true,
+      data: {
+        posts,
+        reach: parseInt(reachRow?.total_reach || 0, 10),
+        week_start: startOfWeek.toISOString()
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching this-week stats:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching this-week stats',
       error: error.message
     });
   }
@@ -761,28 +846,42 @@ exports.getMemoStatistics = async (req, res) => {
     const totalReads = memo.read_receipts.length;
     const totalAcknowledgments = memo.read_receipts.filter(r => r.acknowledged_at).length;
 
-    let targetCount = 0;
-    if (memo.target_audience === 'All') {
-      targetCount = await Employee.count({ where: { company_id, employment_status: 'Active' } });
-    } else if (memo.target_audience === 'Department') {
-      targetCount = await Employee.count({
-        where: {
-          company_id,
-          department: { [Op.in]: memo.target_departments || [] },
-          employment_status: 'Active'
-        }
-      });
-    } else if (memo.target_audience === 'Position') {
-      targetCount = await Employee.count({
-        where: {
-          company_id,
-          position: { [Op.in]: memo.target_positions || [] },
-          employment_status: 'Active'
-        }
-      });
-    } else if (memo.target_audience === 'Specific') {
-      targetCount = (memo.target_employee_ids || []).length;
+    // Full targeted-audience roster, merged with each employee's read receipt
+    const targetedEmployees = await getTargetedEmployees(memo, company_id);
+    const targetCount = targetedEmployees.length;
+
+    const receiptByEmployee = new Map();
+    for (const receipt of memo.read_receipts) {
+      receiptByEmployee.set(receipt.employee_id, receipt);
     }
+
+    const recipients = targetedEmployees.map((emp) => {
+      const receipt = receiptByEmployee.get(emp.id);
+      return {
+        employee: {
+          id: emp.id,
+          full_name: emp.full_name,
+          department: emp.department,
+          position: emp.position
+        },
+        viewed_at: receipt ? receipt.read_at : null,
+        acknowledged_at: receipt ? receipt.acknowledged_at : null,
+        ip_address: receipt ? receipt.ip_address : null
+      };
+    });
+
+    // Acknowledgment progress grouped by department ("By team" widget)
+    const departmentMap = new Map();
+    for (const recipient of recipients) {
+      const dept = recipient.employee.department || 'Unassigned';
+      if (!departmentMap.has(dept)) {
+        departmentMap.set(dept, { department: dept, total: 0, acknowledged: 0 });
+      }
+      const entry = departmentMap.get(dept);
+      entry.total += 1;
+      if (recipient.acknowledged_at) entry.acknowledged += 1;
+    }
+    const byDepartment = Array.from(departmentMap.values()).sort((a, b) => b.total - a.total);
 
     const readPercentage = targetCount > 0 ? ((totalReads / targetCount) * 100).toFixed(2) : 0;
     const acknowledgmentPercentage = targetCount > 0 ? ((totalAcknowledgments / targetCount) * 100).toFixed(2) : 0;
@@ -798,7 +897,9 @@ exports.getMemoStatistics = async (req, res) => {
         read_percentage: readPercentage,
         acknowledgment_percentage: acknowledgmentPercentage,
         requires_acknowledgment: memo.requires_acknowledgment,
-        read_receipts: memo.read_receipts
+        read_receipts: memo.read_receipts,
+        recipients,
+        by_department: byDepartment
       }
     });
   } catch (error) {
@@ -806,6 +907,82 @@ exports.getMemoStatistics = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching statistics',
+      error: error.message
+    });
+  }
+};
+
+// Send an acknowledgment reminder to everyone in the audience who hasn't acknowledged yet
+exports.remindPending = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const company_id = req.user.company_id;
+
+    const memo = await Memo.findOne({
+      where: { public_id: id, company_id },
+      include: [{
+        model: MemoReadReceipt,
+        as: 'read_receipts',
+        attributes: ['employee_id', 'acknowledged_at']
+      }]
+    });
+
+    if (!memo) {
+      return res.status(404).json({ success: false, message: 'Announcement not found' });
+    }
+
+    // Only admin or the author may send reminders
+    if (!['super_admin', 'admin'].includes(req.user.role) && memo.author_id !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to send reminders for this announcement'
+      });
+    }
+
+    if (!memo.requires_acknowledgment) {
+      return res.status(400).json({
+        success: false,
+        message: 'This announcement does not require acknowledgment'
+      });
+    }
+
+    const acknowledgedEmployeeIds = new Set(
+      memo.read_receipts.filter(r => r.acknowledged_at).map(r => r.employee_id)
+    );
+
+    const targetedEmployees = await getTargetedEmployees(memo, company_id);
+    const pendingUserIds = targetedEmployees
+      .filter(emp => !acknowledgedEmployeeIds.has(emp.id))
+      .map(emp => emp.user_id)
+      .filter(Boolean);
+
+    if (pendingUserIds.length === 0) {
+      return res.json({
+        success: true,
+        message: 'Everyone in the audience has already acknowledged this announcement',
+        data: { reminded: 0 }
+      });
+    }
+
+    await notificationService.createBulkNotifications(
+      pendingUserIds,
+      company_id,
+      'announcement_published',
+      'Acknowledgment reminder',
+      `Please acknowledge: ${memo.title}`,
+      { memo_id: memo.id, link: '/communication', reminder: true }
+    );
+
+    res.json({
+      success: true,
+      message: `Reminder sent to ${pendingUserIds.length} employee${pendingUserIds.length === 1 ? '' : 's'}`,
+      data: { reminded: pendingUserIds.length }
+    });
+  } catch (error) {
+    console.error('Error sending acknowledgment reminders:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error sending reminders',
       error: error.message
     });
   }

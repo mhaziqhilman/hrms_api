@@ -137,6 +137,46 @@ router.post(
 );
 
 /**
+ * @route   PATCH /api/files/bulk-verify
+ * @desc    Verify / unverify multiple files
+ * @access  Private (Admin only)
+ */
+router.patch(
+  '/bulk-verify',
+  verifyToken,
+  requireAdmin,
+  body('file_ids').isArray({ min: 1 }).withMessage('file_ids must be a non-empty array'),
+  body('is_verified').isBoolean().withMessage('is_verified must be boolean'),
+  validate,
+  fileController.bulkVerifyFiles
+);
+
+/**
+ * @route   POST /api/files/bulk-download
+ * @desc    Download multiple files as a zip
+ * @access  Private (All authenticated users — staff sees only own/public files)
+ */
+router.post(
+  '/bulk-download',
+  verifyToken,
+  body('file_ids').isArray({ min: 1 }).withMessage('file_ids must be a non-empty array'),
+  validate,
+  fileController.bulkDownloadFiles
+);
+
+/**
+ * @route   GET /api/files/uploaders
+ * @desc    Get distinct uploaders for the current company (admin file filter)
+ * @access  Private (Admin only)
+ */
+router.get(
+  '/uploaders',
+  verifyToken,
+  requireAdmin,
+  fileController.getUploaders
+);
+
+/**
  * @route   GET /api/files
  * @desc    Get all files with filters
  * @access  Private (All authenticated users - filtered by role)

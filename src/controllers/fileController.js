@@ -1,4 +1,5 @@
 const path = require('path');
+const archiver = require('archiver');
 const fileService = require('../services/fileService');
 const supabaseStorage = require('../services/supabaseStorageService');
 const { generateFilename, getStoragePath } = require('../config/upload.config');
@@ -99,6 +100,9 @@ exports.getAllFiles = async (req, res) => {
       related_to_leave_id,
       search,
       is_verified,
+      days,
+      modified_from,
+      modified_to,
       page,
       limit,
       sort,
@@ -114,6 +118,9 @@ exports.getAllFiles = async (req, res) => {
 
     if (category) filters.category = category;
     if (uploaded_by) filters.uploaded_by = uploaded_by;
+    if (days) filters.days = days;
+    if (modified_from) filters.modified_from = modified_from;
+    if (modified_to) filters.modified_to = modified_to;
     if (related_to_employee_id) {
       // If UUID (public_id), resolve to integer employee ID
       if (isNaN(Number(related_to_employee_id))) {
@@ -524,6 +531,113 @@ exports.getFilesByClaim = async (req, res) => {
       message: 'Error fetching claim files',
       error: error.message
     });
+  }
+};
+
+// Get distinct uploaders for current company (admin file filter)
+exports.getUploaders = async (req, res) => {
+  try {
+    const uploaders = await fileService.getUploaders(req.user.company_id);
+    res.json({ success: true, data: uploaders });
+  } catch (error) {
+    console.error('Error fetching uploaders:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching uploaders',
+      error: error.message
+    });
+  }
+};
+
+// Bulk verify / unverify files (admin only)
+exports.bulkVerifyFiles = async (req, res) => {
+  try {
+    const { file_ids, is_verified } = req.body;
+    if (!Array.isArray(file_ids) || file_ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'file_ids must be a non-empty array'
+      });
+    }
+
+    const result = await fileService.bulkVerifyFiles(file_ids, is_verified, req.user.company_id);
+
+    res.json({
+      success: true,
+      message: `${result.updated} file(s) ${is_verified ? 'verified' : 'unverified'}`,
+      data: result
+    });
+  } catch (error) {
+    console.error('Error bulk verifying files:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error bulk verifying files',
+      error: error.message
+    });
+  }
+};
+
+// Bulk download files (zip stream)
+exports.bulkDownloadFiles = async (req, res) => {
+  try {
+    const { file_ids } = req.body;
+    if (!Array.isArray(file_ids) || file_ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'file_ids must be a non-empty array'
+      });
+    }
+
+    const files = await fileService.getFilesForDownload(file_ids, req.user);
+    if (files.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No accessible files found'
+      });
+    }
+
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    const zipName = `documents-${Date.now()}.zip`;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
+
+    archive.on('error', (err) => {
+      console.error('Archive error:', err);
+      try { res.status(500).end(); } catch (_) { /* noop */ }
+    });
+    archive.pipe(res);
+
+    // Track filename collisions inside the zip
+    const usedNames = new Map();
+    for (const file of files) {
+      try {
+        const buffer = await supabaseStorage.downloadFile(file.file_path);
+
+        let entryName = file.original_filename;
+        const count = usedNames.get(entryName) || 0;
+        if (count > 0) {
+          const ext = path.extname(entryName);
+          const base = entryName.slice(0, entryName.length - ext.length);
+          entryName = `${base} (${count})${ext}`;
+        }
+        usedNames.set(file.original_filename, count + 1);
+
+        archive.append(buffer, { name: entryName });
+      } catch (err) {
+        console.warn(`Skipping file ${file.id} (${file.original_filename}): ${err.message}`);
+      }
+    }
+
+    await archive.finalize();
+  } catch (error) {
+    console.error('Error bulk downloading files:', error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        message: 'Error bulk downloading files',
+        error: error.message
+      });
+    }
   }
 };
 

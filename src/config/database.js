@@ -8,7 +8,8 @@ const dbOptions = {
     max: 10,
     min: 0,
     acquire: 30000,
-    idle: 10000
+    idle: 10000,
+    evict: 1000
   },
   define: {
     timestamps: true,
@@ -17,7 +18,23 @@ const dbOptions = {
   },
   timezone: 'Asia/Kuala_Lumpur',
   dialectOptions: {
-    ssl: process.env.DB_SSL === 'true' ? { require: true, rejectUnauthorized: false } : false
+    ssl: process.env.DB_SSL === 'true' ? { require: true, rejectUnauthorized: false } : false,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10000
+  },
+  retry: {
+    match: [
+      /ECONNRESET/,
+      /Connection terminated/,
+      /Connection lost/,
+      /SequelizeConnectionError/,
+      /SequelizeConnectionRefusedError/,
+      /SequelizeHostNotFoundError/,
+      /SequelizeHostNotReachableError/,
+      /SequelizeInvalidConnectionError/,
+      /SequelizeConnectionTimedOutError/
+    ],
+    max: 3
   }
 };
 

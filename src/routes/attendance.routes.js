@@ -66,7 +66,7 @@ const employeeIdParamValidation = [
 
 const queryValidation = [
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
-  query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
+  query('limit').optional().isInt({ min: 1, max: 1000 }).withMessage('Limit must be between 1 and 1000'),
   query('employee_id').optional().isUUID().withMessage('Employee ID must be a valid UUID'),
   query('type').optional().isIn(['Office', 'WFH']).withMessage('Type must be Office or WFH'),
   query('start_date').optional().isISO8601().withMessage('Start date must be a valid date'),

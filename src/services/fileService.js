@@ -77,6 +77,31 @@ class FileService {
         whereClause.is_verified = filters.is_verified === 'true' || filters.is_verified === true;
       }
 
+      // Date filters on uploaded_at: `days` shortcut + explicit range
+      const uploadedAtConds = {};
+      if (filters.days) {
+        const n = parseInt(filters.days);
+        if (!isNaN(n) && n > 0) {
+          const since = new Date();
+          since.setDate(since.getDate() - n);
+          uploadedAtConds[Op.gte] = since;
+        }
+      }
+      if (filters.modified_from) {
+        const from = new Date(filters.modified_from);
+        if (!isNaN(from.getTime())) uploadedAtConds[Op.gte] = from;
+      }
+      if (filters.modified_to) {
+        const to = new Date(filters.modified_to);
+        if (!isNaN(to.getTime())) {
+          to.setHours(23, 59, 59, 999);
+          uploadedAtConds[Op.lte] = to;
+        }
+      }
+      if (Object.getOwnPropertySymbols(uploadedAtConds).length > 0) {
+        whereClause.uploaded_at = uploadedAtConds;
+      }
+
       // Allowed sort columns
       const allowedSortColumns = ['uploaded_at', 'original_filename', 'file_size', 'category'];
       const sortColumn = allowedSortColumns.includes(sort) ? sort : 'uploaded_at';
@@ -367,6 +392,92 @@ class FileService {
       };
     } catch (error) {
       throw new Error(`Failed to fetch my documents: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get distinct uploaders for the given company (admin file filter)
+   */
+  async getUploaders(companyId) {
+    try {
+      const whereClause = { status: 'active' };
+      if (companyId) whereClause.company_id = companyId;
+
+      const rows = await File.findAll({
+        attributes: [
+          [File.sequelize.fn('DISTINCT', File.sequelize.col('uploaded_by')), 'uploaded_by']
+        ],
+        where: whereClause,
+        raw: true
+      });
+
+      const ids = rows.map(r => r.uploaded_by).filter(Boolean);
+      if (ids.length === 0) return [];
+
+      const users = await User.findAll({
+        where: { id: { [Op.in]: ids } },
+        attributes: ['id', 'email'],
+        include: [{
+          model: Employee,
+          as: 'employee',
+          attributes: ['full_name'],
+          required: false,
+          where: companyId ? { company_id: companyId } : undefined
+        }]
+      });
+
+      return users.map(u => ({
+        id: u.id,
+        email: u.email,
+        name: u.employee?.full_name || u.email
+      }));
+    } catch (error) {
+      throw new Error(`Failed to fetch uploaders: ${error.message}`);
+    }
+  }
+
+  /**
+   * Bulk verify / unverify files (admin)
+   */
+  async bulkVerifyFiles(fileIds, isVerified, companyId) {
+    try {
+      const whereClause = { id: { [Op.in]: fileIds }, status: 'active' };
+      if (companyId) whereClause.company_id = companyId;
+
+      const [count] = await File.update(
+        { is_verified: !!isVerified },
+        { where: whereClause }
+      );
+
+      return { updated: count };
+    } catch (error) {
+      throw new Error(`Failed to bulk verify files: ${error.message}`);
+    }
+  }
+
+  /**
+   * Fetch files for bulk download (returns minimal data needed to stream zip)
+   */
+  async getFilesForDownload(fileIds, user) {
+    try {
+      const whereClause = {
+        id: { [Op.in]: fileIds },
+        status: 'active'
+      };
+      if (user.company_id) whereClause.company_id = user.company_id;
+
+      const files = await File.findAll({
+        where: whereClause,
+        attributes: ['id', 'original_filename', 'file_path', 'uploaded_by', 'is_public']
+      });
+
+      // Permission filter for staff
+      if (user.role === 'staff') {
+        return files.filter(f => f.uploaded_by === user.id || f.is_public);
+      }
+      return files;
+    } catch (error) {
+      throw new Error(`Failed to fetch files for download: ${error.message}`);
     }
   }
 }
