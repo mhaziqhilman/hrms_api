@@ -1280,3 +1280,123 @@ sudo systemctl restart nginx
 | 2026-05-04 | OAuth callback URLs updated at Google + GitHub |
 | 2026-05-04 | PM2 systemd unit hardened (Type=oneshot, clean PATH) |
 | 2026-05-04 | Email/SMTP re-configured (App Password + ENCRYPTION_KEY) |
+| 2026-05-29 | Re-migration: Azure/Hostinger Mumbai → Contabo Singapore (parallel-run cutover) — see Appendix D |
+
+---
+
+## Appendix D: Azure → Contabo Re-Migration (Parallel-Run Cutover)
+
+Second migration. Moves the HRMS API off the expiring Hostinger/Azure VPS (Mumbai,
+`20.207.194.66`, expires 30 May 2026) onto a new Contabo VPS (Singapore). Reuses
+Sections 4–14 of this guide for the bulk of the work; this appendix only documents
+the **deltas**: the parallel-run cutover strategy and the new LibreOffice dependency.
+
+### D.0. Why Parallel-Run
+
+Both VPSs are available simultaneously until 30 May. We stand up the new VPS fully on a
+**temporary subdomain** (`api-new.nextura.my`), validate it under real HTTPS, then swap the
+`api.nextura.my` DNS A record. Downtime = DNS propagation only (< 5 min). Rollback = revert
+the A record.
+
+### D.1. Topology Change
+
+| Aspect | Before (this migration) | After |
+|---|---|---|
+| Provider | Hostinger/Azure | Contabo |
+| Region | Mumbai, India | Singapore |
+| Public IP | `20.207.194.66` | `<CONTABO_IP>` |
+| PDF: pdfkit | pure JS (no dep) | unchanged |
+| PDF: libreoffice-convert | **not installed on host** | LibreOffice installed (new) |
+| Domain | `api.nextura.my` | unchanged (DNS A record re-pointed) |
+| OAuth callbacks | `api.nextura.my/...` | unchanged (no provider edits needed) |
+| Supabase (DB + Storage) | external | unchanged |
+
+Because the domain and all callback URLs are preserved, **no OAuth provider, Netlify CSP, or
+`environment.prod.ts` changes are required** — unlike the Render→Azure migration.
+
+### D.2. New Dependency: LibreOffice (for `libreoffice-convert`)
+
+The API uses `libreoffice-convert` ^1.8.1 (DOCX/XLSX → PDF) which spawns the `soffice` binary.
+This was missing from the original host setup. Add it during Section 5 (Runtime Stack):
+
+```bash
+sudo apt install -y libreoffice --no-install-recommends
+sudo apt install -y fonts-liberation fonts-noto-cjk fonts-noto-color-emoji
+soffice --version   # confirm install
+```
+
+`pdfkit` is pure JavaScript and needs nothing extra.
+
+### D.3. Cutover Sequence
+
+| Phase | Action | Ref |
+|---|---|---|
+| 1 | Harden new VPS (SSH keys, UFW, fail2ban, timezone) | §4 |
+| 2 | Install Node 20, PM2, Nginx, Certbot, **+ LibreOffice** | §5 + D.2 |
+| 3 | Clone code, `npm install --production`, transfer `.env` from old VPS | §6 |
+| 4 | Add temp DNS `api-new.nextura.my` → new IP; Nginx + Certbot for temp subdomain; `pm2 start` | §8–10 |
+| 5 | Smoke test on `https://api-new.nextura.my` (login, PDF×2, email, upload) | §15 |
+| 6 | Lower `api` TTL to 60; flip A record to new IP; `certbot --nginx -d api.nextura.my`; verify | §8, §10 |
+| 7 | Monitor 24–48h; delete temp subdomain + cert; let old VPS expire; re-raise TTL | §17 |
+
+### D.4. Transfer `.env` Securely (old → local → new)
+
+Go through your local machine over SSH; never expose secrets to a third party.
+
+```powershell
+# LOCAL PowerShell
+scp kaelZarn@20.207.194.66:/home/kaelZarn/apps/hrms_api/.env C:\temp\hrms.env
+scp C:\temp\hrms.env kaelZarn@<CONTABO_IP>:/home/kaelZarn/apps/hrms_api/.env
+Remove-Item C:\temp\hrms.env   # securely delete local copy
+```
+
+```bash
+# NEW VPS
+chmod 600 ~/apps/hrms_api/.env
+file ~/apps/hrms_api/.env                 # must say "ASCII text"
+sed -i '1s/^\xEF\xBB\xBF//' ~/apps/hrms_api/.env   # strip BOM if present
+```
+
+Confirm `ENCRYPTION_KEY` is present (see §13.2 — its absence breaks stored SMTP passwords).
+
+### D.5. Temp-Subdomain Nginx Block
+
+Identical to §9.1 with `server_name api-new.nextura.my;`. After cutover, copy to a
+real-domain config and re-point:
+
+```bash
+sudo cp /etc/nginx/sites-available/hrms-api-new /etc/nginx/sites-available/hrms-api
+sudo sed -i 's/api-new.nextura.my/api.nextura.my/g' /etc/nginx/sites-available/hrms-api
+sudo ln -s /etc/nginx/sites-available/hrms-api /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d api.nextura.my    # choose redirect HTTP→HTTPS
+```
+
+### D.6. Smoke-Test Matrix (Phase 5)
+
+| Test | Pass criteria |
+|---|---|
+| `curl https://api-new.nextura.my/` | JSON, no SSL error |
+| POST `/api/auth/login` | returns JWT + refreshToken |
+| Payslip download (pdfkit) | valid PDF |
+| Memo/policy export (libreoffice-convert) | valid PDF, CJK/fonts render |
+| Forgot-password email | email arrives |
+| Document upload | lands in Supabase Storage |
+| `pm2 logs hrms-api` | no unhandled errors |
+
+OAuth and frontend integration are deferred to post-cutover (callbacks point at the real
+domain, not the temp subdomain).
+
+### D.7. Contabo-Specific Gotchas
+
+- **Provider firewall:** Contabo Customer Control Panel → Network → Firewall. Confirm inbound
+  22/80/443 are allowed (same trap as §3 — UFW alone is insufficient).
+- **Provisioning delay:** Contabo can take 24–48h post-purchase before the VPS is usable.
+- **Disk I/O:** Contabo's storage is slower than Vultr/DO. LibreOffice cold-start (first
+  `soffice` spawn) may take a few seconds; subsequent conversions are cached and fast.
+
+### D.8. Rollback
+
+DNS swap is reversible in minutes — revert the `api` A record to `20.207.194.66` (TTL 60).
+The old VPS keeps running PM2 + Nginx + cert until expiry (30 May), so it remains a hot
+fallback for the full overlap window. Do not delete the old VPS for at least 7 days.

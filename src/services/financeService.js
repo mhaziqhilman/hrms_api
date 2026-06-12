@@ -1,5 +1,5 @@
 const { Op, fn, col, literal } = require('sequelize');
-const { sequelize, Invoice, Bill, Claim, Project, Payroll, Employee } = require('../models');
+const { sequelize, Invoice, InvoiceItem, Bill, Claim, Project, Payroll, Employee } = require('../models');
 
 /**
  * Finance Service — computes P&L from existing transactional data.
@@ -19,28 +19,81 @@ const buildDateFilter = (field, from, to) => {
 };
 
 const sumInvoices = async (companyId, projectId, from, to) => {
-  const where = {
-    company_id: companyId,
-    status: { [Op.notIn]: ['Cancelled'] },
-    ...buildDateFilter('invoice_date', from, to)
-  };
-  if (projectId) where.project_id = projectId;
+  // Fast path: no project filter — simple aggregate on Invoice
+  if (!projectId) {
+    const result = await Invoice.findOne({
+      where: {
+        company_id: companyId,
+        status: { [Op.notIn]: ['Cancelled'] },
+        ...buildDateFilter('invoice_date', from, to)
+      },
+      attributes: [
+        [fn('COALESCE', fn('SUM', col('total_amount')), 0), 'invoiced'],
+        [fn('COALESCE', fn('SUM', col('amount_paid')), 0), 'received'],
+        [fn('COALESCE', fn('SUM', col('balance_due')), 0), 'receivable'],
+        [fn('COUNT', col('id')), 'count']
+      ],
+      raw: true
+    });
+    return {
+      invoiced: parseFloat(result.invoiced || 0),
+      received: parseFloat(result.received || 0),
+      receivable: parseFloat(result.receivable || 0),
+      count: parseInt(result.count || 0, 10)
+    };
+  }
 
-  const result = await Invoice.findOne({
-    where,
-    attributes: [
-      [fn('COALESCE', fn('SUM', col('total_amount')), 0), 'invoiced'],
-      [fn('COALESCE', fn('SUM', col('amount_paid')), 0), 'received'],
-      [fn('COALESCE', fn('SUM', col('balance_due')), 0), 'receivable'],
-      [fn('COUNT', col('id')), 'count']
-    ],
+  // Project-filtered path: aggregate via line items so multi-PO invoices
+  // contribute only the slice belonging to this project. Payments prorate.
+  const linkedItems = await InvoiceItem.findAll({
+    where: { project_id: projectId },
+    attributes: ['invoice_id'],
     raw: true
   });
+  const itemInvoiceIds = [...new Set(linkedItems.map(r => r.invoice_id))];
+  const idClauses = itemInvoiceIds.length > 0
+    ? [{ project_id: projectId }, { id: { [Op.in]: itemInvoiceIds } }]
+    : [{ project_id: projectId }];
+
+  const invoices = await Invoice.findAll({
+    where: {
+      company_id: companyId,
+      status: { [Op.notIn]: ['Cancelled'] },
+      [Op.or]: idClauses,
+      ...buildDateFilter('invoice_date', from, to)
+    },
+    include: [{
+      model: InvoiceItem,
+      as: 'items',
+      attributes: ['project_id', 'total'],
+      required: false
+    }]
+  });
+
+  let invoiced = 0, received = 0, receivable = 0, count = 0;
+  for (const inv of invoices) {
+    const matchingLines = (inv.items || []).filter(it => it.project_id === projectId);
+    const lineSum = matchingLines.reduce((s, it) => s + parseFloat(it.total || 0), 0);
+    const projectTotal = matchingLines.length > 0
+      ? lineSum
+      : (inv.project_id === projectId ? parseFloat(inv.total_amount || 0) : 0);
+
+    if (projectTotal <= 0) continue;
+
+    const invoiceTotal = parseFloat(inv.total_amount || 0);
+    const ratio = invoiceTotal > 0 ? Math.min(projectTotal / invoiceTotal, 1) : 1;
+
+    invoiced += projectTotal;
+    received += parseFloat(inv.amount_paid || 0) * ratio;
+    receivable += parseFloat(inv.balance_due || 0) * ratio;
+    count += 1;
+  }
+
   return {
-    invoiced: parseFloat(result.invoiced || 0),
-    received: parseFloat(result.received || 0),
-    receivable: parseFloat(result.receivable || 0),
-    count: parseInt(result.count || 0, 10)
+    invoiced: parseFloat(invoiced.toFixed(2)),
+    received: parseFloat(received.toFixed(2)),
+    receivable: parseFloat(receivable.toFixed(2)),
+    count
   };
 };
 
@@ -190,32 +243,90 @@ const getPnl = async (companyId, { project_id = null, from = null, to = null, in
  * Sales summary — month-over-month
  */
 const getSalesByMonth = async (companyId, year, projectInternalId = null) => {
-  const where = {
-    company_id: companyId,
-    status: { [Op.notIn]: ['Cancelled'] },
-    [Op.and]: [literal(`EXTRACT(YEAR FROM "invoice_date") = ${parseInt(year, 10)}`)]
-  };
-  if (projectInternalId) where.project_id = projectInternalId;
+  const yearInt = parseInt(year, 10);
 
-  const rows = await Invoice.findAll({
-    where,
-    attributes: [
-      [literal(`EXTRACT(MONTH FROM "invoice_date")`), 'month'],
-      [fn('COALESCE', fn('SUM', col('total_amount')), 0), 'invoiced'],
-      [fn('COALESCE', fn('SUM', col('amount_paid')), 0), 'received'],
-      [fn('COUNT', col('id')), 'count']
-    ],
-    group: [literal(`EXTRACT(MONTH FROM "invoice_date")`)],
-    order: [[literal('month'), 'ASC']],
+  // Fast path: no project filter
+  if (!projectInternalId) {
+    const rows = await Invoice.findAll({
+      where: {
+        company_id: companyId,
+        status: { [Op.notIn]: ['Cancelled'] },
+        [Op.and]: [literal(`EXTRACT(YEAR FROM "invoice_date") = ${yearInt}`)]
+      },
+      attributes: [
+        [literal(`EXTRACT(MONTH FROM "invoice_date")`), 'month'],
+        [fn('COALESCE', fn('SUM', col('total_amount')), 0), 'invoiced'],
+        [fn('COALESCE', fn('SUM', col('amount_paid')), 0), 'received'],
+        [fn('COUNT', col('id')), 'count']
+      ],
+      group: [literal(`EXTRACT(MONTH FROM "invoice_date")`)],
+      order: [[literal('month'), 'ASC']],
+      raw: true
+    });
+    return rows.map(r => ({
+      month: parseInt(r.month, 10),
+      invoiced: parseFloat(r.invoiced || 0),
+      received: parseFloat(r.received || 0),
+      count: parseInt(r.count || 0, 10)
+    }));
+  }
+
+  // Project-filtered path: load each invoice with items, compute per-project
+  // slice, then bucket by month in JS. Volumes are typically small (one
+  // project's worth of invoices in a year) so this is fine.
+  const linkedItems = await InvoiceItem.findAll({
+    where: { project_id: projectInternalId },
+    attributes: ['invoice_id'],
     raw: true
   });
+  const itemInvoiceIds = [...new Set(linkedItems.map(r => r.invoice_id))];
+  const idClauses = itemInvoiceIds.length > 0
+    ? [{ project_id: projectInternalId }, { id: { [Op.in]: itemInvoiceIds } }]
+    : [{ project_id: projectInternalId }];
 
-  return rows.map(r => ({
-    month: parseInt(r.month, 10),
-    invoiced: parseFloat(r.invoiced || 0),
-    received: parseFloat(r.received || 0),
-    count: parseInt(r.count || 0, 10)
-  }));
+  const invoices = await Invoice.findAll({
+    where: {
+      company_id: companyId,
+      status: { [Op.notIn]: ['Cancelled'] },
+      [Op.or]: idClauses,
+      [Op.and]: [literal(`EXTRACT(YEAR FROM "invoice_date") = ${yearInt}`)]
+    },
+    include: [{
+      model: InvoiceItem,
+      as: 'items',
+      attributes: ['project_id', 'total'],
+      required: false
+    }]
+  });
+
+  const byMonth = new Map();
+  for (const inv of invoices) {
+    const matchingLines = (inv.items || []).filter(it => it.project_id === projectInternalId);
+    const lineSum = matchingLines.reduce((s, it) => s + parseFloat(it.total || 0), 0);
+    const projectTotal = matchingLines.length > 0
+      ? lineSum
+      : (inv.project_id === projectInternalId ? parseFloat(inv.total_amount || 0) : 0);
+    if (projectTotal <= 0) continue;
+
+    const invoiceTotal = parseFloat(inv.total_amount || 0);
+    const ratio = invoiceTotal > 0 ? Math.min(projectTotal / invoiceTotal, 1) : 1;
+
+    const month = new Date(inv.invoice_date).getMonth() + 1;
+    const bucket = byMonth.get(month) || { month, invoiced: 0, received: 0, count: 0 };
+    bucket.invoiced += projectTotal;
+    bucket.received += parseFloat(inv.amount_paid || 0) * ratio;
+    bucket.count += 1;
+    byMonth.set(month, bucket);
+  }
+
+  return Array.from(byMonth.values())
+    .sort((a, b) => a.month - b.month)
+    .map(r => ({
+      month: r.month,
+      invoiced: parseFloat(r.invoiced.toFixed(2)),
+      received: parseFloat(r.received.toFixed(2)),
+      count: r.count
+    }));
 };
 
 /**

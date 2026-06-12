@@ -1,9 +1,20 @@
 const express = require('express');
+const multer = require('multer');
 const router = express.Router();
 const invoiceController = require('../controllers/invoiceController');
 const { verifyToken } = require('../middleware/auth.middleware');
 const { requireAdmin, requireManager } = require('../middleware/rbac.middleware');
 const { body, param, query, validationResult } = require('express-validator');
+
+// PDF upload — 10MB per file, in-memory (forwarded straight to Anthropic).
+const pdfUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 20 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf') cb(null, true);
+    else cb(new Error('Only PDF files are allowed'));
+  }
+});
 
 // Validation middleware
 const validate = (req, res, next) => {
@@ -71,10 +82,39 @@ router.post('/bulk-submit', verifyToken, requireAdmin,
   invoiceController.bulkSubmitToLhdn
 );
 
+// Bulk delete
+router.post('/bulk-delete', verifyToken, requireAdmin,
+  body('invoice_ids').isArray({ min: 1 }).withMessage('At least one invoice ID is required'), validate,
+  invoiceController.bulkDelete
+);
+
 // Validate TIN
 router.post('/validate-tin', verifyToken,
   body('tin').notEmpty().withMessage('TIN is required'), validate,
   invoiceController.validateTin
+);
+
+// AI document extraction (single PDF — returns extracted data, does not create invoice)
+router.post('/extract-from-pdf', verifyToken, requireAdmin,
+  pdfUpload.single('file'),
+  invoiceController.extractFromPdf
+);
+
+// AI bulk import — multiple PDFs, creates invoices for each (legacy: extract+create in one call)
+router.post('/bulk-import', verifyToken, requireAdmin,
+  pdfUpload.array('files', 20),
+  invoiceController.bulkImport
+);
+
+// AI bulk extract — multiple PDFs, returns extracted data only (no DB writes)
+router.post('/bulk-extract', verifyToken, requireAdmin,
+  pdfUpload.array('files', 20),
+  invoiceController.bulkExtract
+);
+
+// AI bulk create — accepts reviewed/edited extracted data, creates invoices
+router.post('/bulk-create', verifyToken, requireAdmin,
+  invoiceController.bulkCreate
 );
 
 // ─── CRUD ──────────────────────────────────────────────────────

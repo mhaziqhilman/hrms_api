@@ -1,0 +1,217 @@
+{
+  "appliedAt": "2026-05-21T09:05:20.795Z",
+  "direction": "+1 day",
+  "companyIdFilter": null,
+  "projects": [
+    {
+      "id": 1,
+      "code": "PR-VLX-26-01",
+      "before": {
+        "start_date": "2025-12-31",
+        "end_date": "2026-02-27",
+        "po_date": "2025-12-16"
+      },
+      "after": {
+        "start_date": "2026-01-01",
+        "end_date": "2026-02-28",
+        "po_date": "2025-12-17"
+      }
+    },
+    {
+      "id": 2,
+      "code": "PR-VLX-26-02",
+      "before": {
+        "start_date": "2025-12-31",
+        "end_date": "2026-02-27",
+        "po_date": "2026-04-01"
+      },
+      "after": {
+        "start_date": "2026-01-01",
+        "end_date": "2026-02-28",
+        "po_date": "2026-04-02"
+      }
+    },
+    {
+      "id": 3,
+      "code": "PR-VLX-26-03",
+      "before": {
+        "start_date": "2025-12-31",
+        "end_date": "2026-02-27",
+        "po_date": "2025-12-29"
+      },
+      "after": {
+        "start_date": "2026-01-01",
+        "end_date": "2026-02-28",
+        "po_date": "2025-12-30"
+      }
+    },
+    {
+      "id": 4,
+      "code": "PR-VLX-26-04",
+      "before": {
+        "start_date": "2025-12-31",
+        "end_date": "2026-02-27",
+        "po_date": "2026-04-01"
+      },
+      "after": {
+        "start_date": "2026-01-01",
+        "end_date": "2026-02-28",
+        "po_date": "2026-04-02"
+      }
+    },
+    {
+      "id": 5,
+      "code": "PR-VLX-26-05",
+      "before": {
+        "start_date": "2025-12-31",
+        "end_date": "2026-02-27",
+        "po_date": "2025-12-29"
+      },
+      "after": {
+        "start_date": "2026-01-01",
+        "end_date": "2026-02-28",
+        "po_date": "2025-12-30"
+      }
+    },
+    {
+      "id": 6,
+      "code": "PR-VLX-26-06",
+      "before": {
+        "start_date": "2026-02-28",
+        "end_date": "2026-08-30",
+        "po_date": "2026-03-10"
+      },
+      "after": {
+        "start_date": "2026-03-01",
+        "end_date": "2026-08-31",
+        "po_date": "2026-03-11"
+      }
+    },
+    {
+      "id": 7,
+      "code": "PR-VLX-26-07",
+      "before": {
+        "start_date": "2026-04-05",
+        "end_date": "2026-09-29",
+        "po_date": "2026-04-05"
+      },
+      "after": {
+        "start_date": "2026-04-06",
+        "end_date": "2026-09-30",
+        "po_date": "2026-04-06"
+      }
+    },
+    {
+      "id": 8,
+      "code": "PR-VLX-25-01",
+      "before": {
+        "start_date": "2026-01-31",
+        "end_date": "2026-12-30",
+        "po_date": "2026-03-09"
+      },
+      "after": {
+        "start_date": "2026-02-01",
+        "end_date": "2026-12-31",
+        "po_date": "2026-03-10"
+      }
+    },
+    {
+      "id": 9,
+      "code": "PR-VLX-25-02",
+      "before": {
+        "start_date": "2025-02-28",
+        "end_date": "2025-04-29",
+        "po_date": "2025-02-27"
+      },
+      "after": {
+        "start_date": "2025-03-01",
+        "end_date": "2025-04-30",
+        "po_date": "2025-02-28"
+      }
+    },
+    {
+      "id": 10,
+      "code": "PR-VLX-25-03",
+      "before": {
+        "start_date": "2025-02-28",
+        "end_date": "2025-06-29",
+        "po_date": "2025-02-27"
+      },
+      "after": {
+        "start_date": "2025-03-01",
+        "end_date": "2025-06-30",
+        "po_date": "2025-02-28"
+      }
+    },
+    {
+      "id": 11,
+      "code": "PR-VLX-25-04",
+      "before": {
+        "start_date": "2025-01-31",
+        "end_date": "2025-12-30",
+        "po_date": "2025-03-09"
+      },
+      "after": {
+        "start_date": "2025-02-01",
+        "end_date": "2025-12-31",
+        "po_date": "2025-03-10"
+      }
+    },
+    {
+      "id": 12,
+      "code": "PR-VLX-25-05",
+      "before": {
+        "start_date": "2025-06-30",
+        "end_date": "2025-12-30",
+        "po_date": "2025-08-27"
+      },
+      "after": {
+        "start_date": "2025-07-01",
+        "end_date": "2025-12-31",
+        "po_date": "2025-08-28"
+      }
+    },
+    {
+      "id": 13,
+      "code": "PR-VLX-25-06",
+      "before": {
+        "start_date": "2025-07-14",
+        "end_date": "2025-12-30",
+        "po_date": "2025-07-14"
+      },
+      "after": {
+        "start_date": "2025-07-15",
+        "end_date": "2025-12-31",
+        "po_date": "2025-07-15"
+      }
+    },
+    {
+      "id": 14,
+      "code": "PR-VLX-25-07",
+      "before": {
+        "start_date": "2025-04-30",
+        "end_date": "2025-12-30",
+        "po_date": "2025-08-03"
+      },
+      "after": {
+        "start_date": "2025-05-01",
+        "end_date": "2025-12-31",
+        "po_date": "2025-08-04"
+      }
+    },
+    {
+      "id": 15,
+      "code": "PR-VLX-25-08",
+      "before": {
+        "start_date": "2025-06-30",
+        "end_date": "2025-12-30",
+        "po_date": "2025-08-03"
+      },
+      "after": {
+        "start_date": "2025-07-01",
+        "end_date": "2025-12-31",
+        "po_date": "2025-08-04"
+      }
+    }
+  ]
+}

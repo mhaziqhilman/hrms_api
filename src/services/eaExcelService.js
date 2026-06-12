@@ -19,6 +19,7 @@ const TEMPLATE_PATH = path.join(__dirname, '..', '..', 'docs', 'template', 'ea_p
  * @param {Object} data.deductions - Aggregated deduction totals
  * @param {Object} data.employer_contributions - Employer contribution totals
  * @param {number} data.serialNo  - Sequential serial number for this EA form
+ * @param {string} [data.formDate] - Optional YYYY-MM-DD date for the form's "Tarikh" (defaults to today)
  * @returns {Promise<Buffer>}     - Excel file buffer
  */
 const generateEAFormExcel = async (data) => {
@@ -65,33 +66,54 @@ const generateEAFormExcel = async (data) => {
   setCell('AI14', employee.socso_no || '');
   setCell('K16', employee.number_of_children || 0);
 
-  // A8: Tarikh mula bekerja (start date of work) — always show
-  if (employee.join_date) {
+  // Section 9 — "Jika bekerja tidak genap setahun, nyatakan" (if not employed
+  // for the full tax year, state the dates).
+
+  // 9(a): Tarikh mula bekerja — only when the employee STARTED during this tax
+  // year. If they joined in a prior year they were employed from 1 Jan, so the
+  // start date is left blank.
+  if (employee.join_date && new Date(employee.join_date).getFullYear() === year) {
     const joinCell = ws.getCell('AI16');
     joinCell.value = format(new Date(employee.join_date), 'dd/MM/yyyy');
     joinCell.font = { ...joinCell.font, size: 10 };
   }
-  // If employee resigned during the year
-  if (employee.employment_status === 'Resigned' && employee.updated_at) {
-    const resignYear = new Date(employee.updated_at).getFullYear();
-    if (resignYear === year) {
-      setCell('AI17', format(new Date(employee.updated_at), 'dd/MM/yyyy'));
-    }
+
+  // 9(b): Tarikh berhenti bekerja — the employee's last working day. Prefer the
+  // recorded end_date; fall back to updated_at for legacy records that left
+  // before end_date was tracked. Only shown when they left during this tax year.
+  const lastWorkingDay = employee.end_date
+    || ((employee.employment_status === 'Resigned' || employee.employment_status === 'Terminated')
+          ? employee.updated_at
+          : null);
+  if (lastWorkingDay && new Date(lastWorkingDay).getFullYear() === year) {
+    const endCell = ws.getCell('AI17');
+    endCell.value = format(new Date(lastWorkingDay), 'dd/MM/yyyy');
+    endCell.font = { ...endCell.font, size: 10 };
   }
 
   // ─── Section B — Income ──────────────────────────────────────
   // B1a: Gross salary + overtime
-  setCell('AK22', income.salary + income.overtime);
+  const b1a = income.salary + income.overtime;
+  setCell('AK22', b1a);
   // B1b: Commission + bonus
-  setCell('AK23', income.commission + income.bonus);
+  const b1b = income.commission + income.bonus;
+  setCell('AK23', b1b);
   // B1c: Allowances / tips / perquisites
-  setCell('AK24', income.allowances);
+  const b1c = income.allowances;
+  setCell('AK24', b1c);
   // B1d–B1f, B2–B6: Not currently tracked — leave as 0/blank
 
   // ─── Section C — Pension ─────────────────────────────────────
   // Not tracked — leave as 0/blank
 
-  // JUMLAH (row 44) has a SUM formula and will auto-calculate
+  // JUMLAH (row 44): the template carries a SUM formula but with no cached
+  // result. ExcelJS does not evaluate formulas, and LibreOffice's headless
+  // PDF conversion renders the stale cached value (0.00) instead of
+  // recalculating. So we write the formula back WITH a computed result —
+  // the PDF shows the correct total and Excel still recalculates on open.
+  const jumlah = b1a + b1b + b1c;
+  const jumlahFormula = 'SUM(AK22:AP27,AK31:AP33,AK35:AP37,AK39:AP39,AK42:AP43)';
+  ws.getCell('AK44').value = { formula: jumlahFormula, result: jumlah };
 
   // ─── Section D — Deductions ──────────────────────────────────
   // D1: PCB
@@ -120,7 +142,14 @@ const generateEAFormExcel = async (data) => {
       setCell('X71', addressLines.slice(1).join(', '));
     }
   }
-  setCell('C73', format(new Date(), 'dd/MM/yyyy'));
+  // Tarikh — use the caller-supplied form date (for back-dating older forms),
+  // falling back to today. Parsed component-wise to stay timezone-safe.
+  let tarikh = new Date();
+  if (data.formDate) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(data.formDate));
+    if (m) tarikh = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  }
+  setCell('C73', format(tarikh, 'dd/MM/yyyy'));
   setCell('X73', company.employer_phone || company.phone || '');
 
   // Generate buffer

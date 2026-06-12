@@ -283,6 +283,7 @@ Invoice.belongsTo(User, { foreignKey: 'cancelled_by', as: 'canceller' });
 
 Invoice.hasMany(InvoiceItem, { foreignKey: 'invoice_id', as: 'items', onDelete: 'CASCADE' });
 InvoiceItem.belongsTo(Invoice, { foreignKey: 'invoice_id', as: 'invoice' });
+InvoiceItem.belongsTo(Project, { foreignKey: 'project_id', as: 'project' });
 
 Invoice.hasMany(InvoicePayment, { foreignKey: 'invoice_id', as: 'payments', onDelete: 'CASCADE' });
 InvoicePayment.belongsTo(Invoice, { foreignKey: 'invoice_id', as: 'invoice' });

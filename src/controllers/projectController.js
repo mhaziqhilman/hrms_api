@@ -1,6 +1,85 @@
 const { Op, fn, col, literal } = require('sequelize');
-const { Project, Invoice, Bill, Claim, User, sequelize } = require('../models');
+const { Project, Invoice, InvoiceItem, Bill, Claim, User, sequelize } = require('../models');
 const auditService = require('../services/auditService');
+
+// Status filter for invoice aggregations — exclude drafts and cancelled.
+const ACTIVE_INVOICE_STATUSES = { [Op.notIn]: ['Cancelled', 'Draft'] };
+
+/**
+ * Return per-project invoice slices: each invoice's contribution to THIS project
+ * via line items linked to it, OR via the invoice header project_id (legacy).
+ * Payments are tracked at invoice level, so we prorate by the project's share.
+ */
+async function loadProjectInvoiceSlices(project, { statusFilter = ACTIVE_INVOICE_STATUSES } = {}) {
+  // Step 1: invoice IDs that touch this project via line items
+  const linkedItems = await InvoiceItem.findAll({
+    where: { project_id: project.id },
+    attributes: ['invoice_id'],
+    raw: true
+  });
+  const itemInvoiceIds = [...new Set(linkedItems.map(r => r.invoice_id))];
+
+  // Step 2: union of (header project_id = X) OR (any line item project_id = X)
+  const idClauses = itemInvoiceIds.length > 0
+    ? [{ project_id: project.id }, { id: { [Op.in]: itemInvoiceIds } }]
+    : [{ project_id: project.id }];
+
+  const invoices = await Invoice.findAll({
+    where: {
+      company_id: project.company_id,
+      status: statusFilter,
+      [Op.or]: idClauses
+    },
+    include: [{
+      model: InvoiceItem,
+      as: 'items',
+      attributes: ['id', 'project_id', 'total'],
+      required: false
+    }],
+    order: [['invoice_date', 'DESC']]
+  });
+
+  return invoices.map(inv => {
+    const matchingLines = (inv.items || []).filter(it => it.project_id === project.id);
+    // project_total: prefer line items if any line is linked; else use header
+    // total (legacy invoices created before per-line linkage existed).
+    const lineSum = matchingLines.reduce((s, it) => s + parseFloat(it.total || 0), 0);
+    const project_total = matchingLines.length > 0
+      ? lineSum
+      : (inv.project_id === project.id ? parseFloat(inv.total_amount || 0) : 0);
+
+    const invoiceTotal = parseFloat(inv.total_amount || 0);
+    const ratio = invoiceTotal > 0 ? Math.min(project_total / invoiceTotal, 1) : 1;
+
+    return {
+      invoice: inv,
+      project_total,
+      project_amount_paid: parseFloat((parseFloat(inv.amount_paid || 0) * ratio).toFixed(2)),
+      project_balance_due: parseFloat((parseFloat(inv.balance_due || 0) * ratio).toFixed(2)),
+      project_line_count: matchingLines.length,
+      total_line_count: (inv.items || []).length
+    };
+  });
+}
+
+/**
+ * Aggregate invoiced / received / receivable totals for a project, slicing
+ * each invoice by its per-project contribution.
+ */
+async function aggregateProjectInvoices(project) {
+  const slices = await loadProjectInvoiceSlices(project);
+  let total_invoiced = 0, total_received = 0, total_receivable = 0;
+  for (const s of slices) {
+    total_invoiced += s.project_total;
+    total_received += s.project_amount_paid;
+    total_receivable += s.project_balance_due;
+  }
+  return {
+    total_invoiced: parseFloat(total_invoiced.toFixed(2)),
+    total_received: parseFloat(total_received.toFixed(2)),
+    total_receivable: parseFloat(total_receivable.toFixed(2))
+  };
+}
 
 // POST /api/projects
 const createProject = async (req, res, next) => {
@@ -68,7 +147,7 @@ const createProject = async (req, res, next) => {
 const getAllProjects = async (req, res, next) => {
   try {
     const companyId = req.user.company_id;
-    const { page = 1, limit = 20, status, search, sort = 'created_at', order = 'DESC' } = req.query;
+    const { page = 1, limit = 20, status, search, year, sort = 'created_at', order = 'DESC' } = req.query;
 
     const where = { company_id: companyId };
     if (status) where.status = { [Op.in]: status.split(',') };
@@ -77,6 +156,25 @@ const getAllProjects = async (req, res, next) => {
         { code: { [Op.iLike]: `%${search}%` } },
         { name: { [Op.iLike]: `%${search}%` } },
         { client_name: { [Op.iLike]: `%${search}%` } }
+      ];
+    }
+
+    // Year filter — match projects whose start/end date range touches the given year
+    if (year && /^\d{4}$/.test(String(year))) {
+      const startOfYear = `${year}-01-01`;
+      const endOfYear = `${year}-12-31`;
+      where[Op.and] = [
+        ...(where[Op.and] || []),
+        {
+          [Op.or]: [
+            // project span overlaps the year (both dates set)
+            { start_date: { [Op.lte]: endOfYear }, end_date: { [Op.gte]: startOfYear } },
+            // start date falls within the year
+            { start_date: { [Op.between]: [startOfYear, endOfYear] } },
+            // end date falls within the year
+            { end_date: { [Op.between]: [startOfYear, endOfYear] } }
+          ]
+        }
       ];
     }
 
@@ -125,29 +223,21 @@ const getProjectById = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Project not found' });
     }
 
-    // Compute roll-up financials
-    const [salesAgg, billsAgg] = await Promise.all([
-      Invoice.findOne({
-        where: { project_id: project.id, company_id: project.company_id, status: { [Op.notIn]: ['Cancelled', 'Draft'] } },
-        attributes: [
-          [fn('COALESCE', fn('SUM', col('total_amount')), 0), 'total_invoiced'],
-          [fn('COALESCE', fn('SUM', col('amount_paid')), 0), 'total_received'],
-          [fn('COALESCE', fn('SUM', col('balance_due')), 0), 'total_receivable']
-        ],
-        raw: true
-      }),
-      Bill.findOne({
-        where: { project_id: project.id, company_id: project.company_id, status: { [Op.ne]: 'Cancelled' } },
-        attributes: [
-          [fn('COALESCE', fn('SUM', col('total_amount')), 0), 'total_billed'],
-          [fn('COALESCE', fn('SUM', col('amount_paid')), 0), 'total_paid'],
-          [fn('COALESCE', fn('SUM', col('balance_due')), 0), 'total_payable']
-        ],
-        raw: true
-      })
-    ]);
+    // Compute roll-up financials — aggregate via line items so multi-PO invoices
+    // contribute only the lines that belong to THIS project (proration applied
+    // to payments since payment is tracked at invoice level).
+    const salesAgg = await aggregateProjectInvoices(project);
+    const billsAgg = await Bill.findOne({
+      where: { project_id: project.id, company_id: project.company_id, status: { [Op.ne]: 'Cancelled' } },
+      attributes: [
+        [fn('COALESCE', fn('SUM', col('total_amount')), 0), 'total_billed'],
+        [fn('COALESCE', fn('SUM', col('amount_paid')), 0), 'total_paid'],
+        [fn('COALESCE', fn('SUM', col('balance_due')), 0), 'total_payable']
+      ],
+      raw: true
+    });
 
-    const sales = parseFloat(salesAgg?.total_received || 0);
+    const sales = salesAgg.total_received;
     const expenses = parseFloat(billsAgg?.total_paid || 0);
 
     res.json({
@@ -155,15 +245,15 @@ const getProjectById = async (req, res, next) => {
       data: {
         ...project.toJSON(),
         financials: {
-          total_invoiced: parseFloat(salesAgg?.total_invoiced || 0),
+          total_invoiced: salesAgg.total_invoiced,
           total_received: sales,
-          total_receivable: parseFloat(salesAgg?.total_receivable || 0),
+          total_receivable: salesAgg.total_receivable,
           total_billed: parseFloat(billsAgg?.total_billed || 0),
           total_paid: expenses,
           total_payable: parseFloat(billsAgg?.total_payable || 0),
           realized_profit: parseFloat((sales - expenses).toFixed(2)),
           unrealized_profit: parseFloat(
-            (parseFloat(salesAgg?.total_receivable || 0) - parseFloat(billsAgg?.total_payable || 0)).toFixed(2)
+            (salesAgg.total_receivable - parseFloat(billsAgg?.total_payable || 0)).toFixed(2)
           )
         }
       }
@@ -239,12 +329,10 @@ const getProjectTransactions = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Project not found' });
     }
 
-    const [invoices, bills, claims] = await Promise.all([
-      Invoice.findAll({
-        where: { project_id: project.id },
-        attributes: ['id', 'public_id', 'invoice_number', 'invoice_date', 'buyer_name', 'total_amount', 'amount_paid', 'balance_due', 'status'],
-        order: [['invoice_date', 'DESC']]
-      }),
+    // Invoices: include legacy-status (Draft etc.) too for full visibility on the
+    // transactions tab — only the financial roll-up excludes them.
+    const [invoiceSlices, bills, claims] = await Promise.all([
+      loadProjectInvoiceSlices(project, { statusFilter: { [Op.ne]: null } }),
       Bill.findAll({
         where: { project_id: project.id },
         attributes: ['id', 'public_id', 'bill_number', 'bill_type', 'bill_date', 'vendor_name', 'category', 'total_amount', 'amount_paid', 'balance_due', 'status'],
@@ -255,6 +343,28 @@ const getProjectTransactions = async (req, res, next) => {
         attributes: ['id', 'public_id', 'date', 'amount', 'description', 'status']
       })
     ]);
+
+    // Flatten slices: invoice fields + project-specific contribution fields.
+    const invoices = invoiceSlices.map(s => {
+      const inv = s.invoice;
+      return {
+        id: inv.id,
+        public_id: inv.public_id,
+        invoice_number: inv.invoice_number,
+        invoice_date: inv.invoice_date,
+        buyer_name: inv.buyer_name,
+        total_amount: parseFloat(inv.total_amount || 0),
+        amount_paid: parseFloat(inv.amount_paid || 0),
+        balance_due: parseFloat(inv.balance_due || 0),
+        status: inv.status,
+        // Per-project slice
+        project_total: s.project_total,
+        project_amount_paid: s.project_amount_paid,
+        project_balance_due: s.project_balance_due,
+        project_line_count: s.project_line_count,
+        total_line_count: s.total_line_count
+      };
+    });
 
     res.json({ success: true, data: { invoices, bills, claims } });
   } catch (error) { next(error); }

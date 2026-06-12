@@ -275,6 +275,7 @@ exports.downloadEAFormPDF = async (req, res, next) => {
     if (data.error) {
       return res.status(404).json({ success: false, message: data.error });
     }
+    if (req.query.form_date) data.formDate = req.query.form_date;
 
     // Generate the filled LHDN Excel template
     const excelBuffer = await generateEAFormExcel(data);
@@ -304,6 +305,7 @@ exports.downloadEAFormExcel = async (req, res, next) => {
     if (data.error) {
       return res.status(404).json({ success: false, message: data.error });
     }
+    if (req.query.form_date) data.formDate = req.query.form_date;
 
     const excelBuffer = await generateEAFormExcel(data);
 
@@ -329,6 +331,7 @@ exports.sendEAFormEmail = async (req, res, next) => {
     if (data.error) {
       return res.status(404).json({ success: false, message: data.error });
     }
+    if (req.query.form_date) data.formDate = req.query.form_date;
 
     // Get employee's email (prefer user account email, fall back to employee email)
     const employee = await Employee.findOne({ where: { public_id: employee_id }, attributes: ['id', 'user_id', 'full_name', 'email'] });
@@ -1279,6 +1282,7 @@ exports.bulkDownloadEAFormPDF = async (req, res, next) => {
           logger.warn(`Skipping EA form for employee ${emp.employee_id}: ${data.error}`);
           continue;
         }
+        if (req.query.form_date) data.formDate = req.query.form_date;
 
         const excelBuffer = await generateEAFormExcel(data);
         const pdfBuffer = await convertAsync(excelBuffer, '.pdf', undefined);

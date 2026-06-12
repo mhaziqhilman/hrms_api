@@ -527,6 +527,71 @@ exports.setWfhFlexible = async (req, res, next) => {
 };
 
 /**
+ * Change an employee's employment status (Active / Resigned / Terminated).
+ * - Reactivating (-> Active) clears the end date.
+ * - Resigning/Terminating accepts an optional end_date (last working day) and reason.
+ * Unlike deleteEmployee, this handles every transition including reactivation.
+ */
+exports.setEmploymentStatus = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { employment_status, end_date, reason } = req.body;
+
+    const employee = await Employee.findOne({
+      where: { public_id: id, company_id: req.user.company_id }
+    });
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: 'Employee not found'
+      });
+    }
+
+    const previousStatus = employee.employment_status;
+    const previousEndDate = employee.end_date;
+
+    const updates = { employment_status };
+    if (employment_status === 'Active') {
+      // Reactivating an employee — clear the last working day.
+      updates.end_date = null;
+    } else {
+      // Resigned / Terminated — set the last working day if provided.
+      updates.end_date = end_date || null;
+    }
+
+    await employee.update(updates);
+
+    logger.info(`Employee ${id} status changed to ${employment_status}`, {
+      employee_id: id,
+      end_date: updates.end_date,
+      reason,
+      changed_by: req.user.id
+    });
+
+    auditService.log({
+      userId: req.user.id,
+      companyId: req.user.company_id,
+      action: employment_status === 'Active' ? 'employee.reactivated' : 'employee.status_changed',
+      entityType: 'Employee',
+      entityId: employee.public_id || employee.id,
+      oldValues: { employment_status: previousStatus, end_date: previousEndDate },
+      newValues: { employment_status, end_date: updates.end_date, reason },
+      req
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Employee status changed to ${employment_status}`,
+      data: employee
+    });
+  } catch (error) {
+    logger.error(`Error changing status for employee ${req.params.id}:`, error);
+    next(error);
+  }
+};
+
+/**
  * Soft delete employee (update status to Resigned/Terminated)
  */
 exports.deleteEmployee = async (req, res, next) => {

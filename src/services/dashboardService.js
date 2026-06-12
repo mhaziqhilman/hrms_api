@@ -379,6 +379,7 @@ const getManagerDashboard = async (companyId, userId) => {
   // If no direct reports, fall back to department-based team
   let effectiveTeamIds = teamMemberIds;
   let effectiveTotal = totalMembers;
+  let effectiveTeamMembers = teamMembers;
 
   if (totalMembers === 0 && managerEmployee.department) {
     const deptMembers = await Employee.findAll({
@@ -393,6 +394,7 @@ const getManagerDashboard = async (companyId, userId) => {
     });
     effectiveTeamIds = deptMembers.map(m => m.id);
     effectiveTotal = deptMembers.length;
+    effectiveTeamMembers = deptMembers;
   }
 
   // Team attendance today
@@ -508,6 +510,174 @@ const getManagerDashboard = async (companyId, userId) => {
     });
   });
 
+  // ─── Team roster — full team list with each member's status today ──────
+  const STATUS_RANK = { Present: 0, WFH: 1, Leave: 2, Absent: 3 };
+  const teamRoster = effectiveTeamMembers
+    .map(m => {
+      const att = teamAttendanceToday.find(a => a.employee_id === m.id);
+      const leaveRec = onLeaveMembers.find(l => l.employee_id === m.id);
+      let status = 'Absent';
+      let clockIn = null;
+      let late = false;
+      if (att) {
+        status = att.type === 'WFH' ? 'WFH' : 'Present';
+        late = att.is_late || false;
+        if (att.clock_in_time) {
+          const ci = new Date(att.clock_in_time);
+          clockIn = `${String(ci.getHours()).padStart(2, '0')}:${String(ci.getMinutes()).padStart(2, '0')}`;
+        }
+      } else if (leaveRec) {
+        status = 'Leave';
+      }
+      return { name: m.full_name || 'Unknown', status, clockIn, late };
+    })
+    .sort((a, b) => {
+      const rank = STATUS_RANK[a.status] - STATUS_RANK[b.status];
+      if (rank !== 0) return rank;
+      if (a.clockIn && b.clockIn) return a.clockIn.localeCompare(b.clockIn);
+      return a.name.localeCompare(b.name);
+    });
+
+  // ─── Week ahead — planned leave & WFH for this week + next week ────────
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const toDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const firstName = (full) => (full || 'Unknown').trim().split(/\s+/)[0];
+
+  const todayDate = new Date(`${today}T00:00:00`);
+  const dow = todayDate.getDay();
+  const thisWeekMonday = new Date(todayDate);
+  thisWeekMonday.setDate(todayDate.getDate() + (dow === 0 ? -6 : 1 - dow));
+  const nextWeekMonday = new Date(thisWeekMonday);
+  nextWeekMonday.setDate(thisWeekMonday.getDate() + 7);
+
+  const buildWeek = (weekMonday) => {
+    const days = [];
+    for (let i = 0; i < 5; i++) {
+      const d = new Date(weekMonday);
+      d.setDate(weekMonday.getDate() + i);
+      const key = toDateStr(d);
+      days.push({ key, label: `${DAY_SHORT[d.getDay()]} ${d.getDate()}`, isToday: key === today, events: [] });
+    }
+    return days;
+  };
+
+  const thisWeekDays = buildWeek(thisWeekMonday);
+  const nextWeekDays = buildWeek(nextWeekMonday);
+  const allWeekDays = [...thisWeekDays, ...nextWeekDays];
+  const rangeStart = allWeekDays[0].key;
+  const rangeEnd = allWeekDays[allWeekDays.length - 1].key;
+
+  let weekWfh = [];
+  let weekLeaves = [];
+  if (effectiveTeamIds.length > 0) {
+    weekWfh = await WFHApplication.findAll({
+      where: {
+        employee_id: { [Op.in]: effectiveTeamIds },
+        status: 'Approved',
+        date: { [Op.between]: [rangeStart, rangeEnd] }
+      },
+      include: [{ model: Employee, as: 'employee', attributes: ['full_name'] }],
+      raw: false
+    });
+    weekLeaves = await Leave.findAll({
+      where: {
+        employee_id: { [Op.in]: effectiveTeamIds },
+        status: 'Approved',
+        start_date: { [Op.lte]: rangeEnd },
+        end_date: { [Op.gte]: rangeStart }
+      },
+      include: [
+        { model: Employee, as: 'employee', attributes: ['full_name'] },
+        { model: LeaveType, as: 'leave_type', attributes: ['name'] }
+      ],
+      raw: false
+    });
+  }
+
+  allWeekDays.forEach(day => {
+    weekWfh.forEach(w => {
+      if (w.date === day.key) {
+        day.events.push({ employee: firstName(w.employee?.full_name), type: 'WFH', detail: 'WFH' });
+      }
+    });
+    weekLeaves.forEach(l => {
+      if (l.start_date <= day.key && l.end_date >= day.key) {
+        day.events.push({ employee: firstName(l.employee?.full_name), type: 'Leave', detail: l.leave_type?.name || 'Leave' });
+      }
+    });
+  });
+
+  const rangeLabel = (days) => {
+    const first = new Date(`${days[0].key}T00:00:00`);
+    const last = new Date(`${days[days.length - 1].key}T00:00:00`);
+    return `${first.getDate()} ${MONTHS[first.getMonth()]} – ${last.getDate()} ${MONTHS[last.getMonth()]}`;
+  };
+
+  // Coverage note — the weekday with the most people on leave this week
+  let heaviest = null;
+  thisWeekDays.forEach(day => {
+    const leaveCount = day.events.filter(e => e.type === 'Leave').length;
+    if (leaveCount > 0 && (!heaviest || leaveCount > heaviest.count)) {
+      heaviest = { label: day.label, count: leaveCount };
+    }
+  });
+  const coverageNote = heaviest
+    ? `Heaviest day: ${heaviest.label} · ${heaviest.count} on leave`
+    : 'No planned leave this week — full coverage';
+
+  const weekAhead = {
+    thisWeek: { rangeLabel: rangeLabel(thisWeekDays), days: thisWeekDays },
+    nextWeek: { rangeLabel: rangeLabel(nextWeekDays), days: nextWeekDays },
+    coverageNote
+  };
+
+  // ─── Team pulse — rolling 30-day metrics ───────────────────────────────
+  const start30 = new Date(todayDate);
+  start30.setDate(todayDate.getDate() - 30);
+  const start30Str = toDateStr(start30);
+
+  let attCount = 0;
+  let lateCount = 0;
+  let decisions = 0;
+  if (effectiveTeamIds.length > 0) {
+    attCount = await Attendance.count({
+      where: { employee_id: { [Op.in]: effectiveTeamIds }, date: { [Op.between]: [start30Str, today] } }
+    });
+    lateCount = await Attendance.count({
+      where: { employee_id: { [Op.in]: effectiveTeamIds }, date: { [Op.between]: [start30Str, today] }, is_late: true }
+    });
+    const decidedLeaves = await Leave.count({
+      where: { employee_id: { [Op.in]: effectiveTeamIds }, status: { [Op.in]: ['Approved', 'Rejected'] }, updated_at: { [Op.gte]: start30 } }
+    });
+    const decidedClaims = await Claim.count({
+      where: { employee_id: { [Op.in]: effectiveTeamIds }, status: { [Op.ne]: 'Pending' }, updated_at: { [Op.gte]: start30 } }
+    });
+    const decidedWfh = await WFHApplication.count({
+      where: { employee_id: { [Op.in]: effectiveTeamIds }, status: { [Op.in]: ['Approved', 'Rejected'] }, updated_at: { [Op.gte]: start30 } }
+    });
+    decisions = decidedLeaves + decidedClaims + decidedWfh;
+  }
+
+  let workingDays = 0;
+  for (let i = 0; i < 30; i++) {
+    const d = new Date(todayDate);
+    d.setDate(todayDate.getDate() - i);
+    const wd = d.getDay();
+    if (wd !== 0 && wd !== 6) workingDays++;
+  }
+  const expectedAtt = effectiveTotal * workingDays;
+  const teamPulse = {
+    attendanceRate: expectedAtt > 0 ? Math.min(100, Math.round((attCount / expectedAtt) * 100)) : 0,
+    onTimeRate: attCount > 0 ? Math.round(((attCount - lateCount) / attCount) * 100) : 0,
+    decisions
+  };
+
+  // Leave requests starting within 2 days are flagged urgent
+  const urgentCutoff = new Date(todayDate);
+  urgentCutoff.setDate(todayDate.getDate() + 2);
+  const urgentCutoffStr = toDateStr(urgentCutoff);
+
   return {
     teamStats: {
       totalMembers: effectiveTotal,
@@ -521,18 +691,24 @@ const getManagerDashboard = async (companyId, userId) => {
       wfh: pendingWfh.length
     },
     teamAttendance: formattedAttendance,
+    teamRoster,
+    weekAhead,
+    teamPulse,
     leavePendingApproval: pendingLeaves.map(l => ({
       id: l.id,
+      public_id: l.public_id,
       employee: l.employee?.full_name || 'Unknown',
       type: l.leave_type?.name || 'Unknown',
       from: l.start_date,
       to: l.end_date,
       days: parseFloat(l.total_days),
       reason: l.reason || '',
-      status: l.status
+      status: l.status,
+      urgent: l.start_date <= urgentCutoffStr
     })),
     claimsPendingApproval: pendingClaims.map(c => ({
       id: c.id,
+      public_id: c.public_id,
       employee: c.employee?.full_name || 'Unknown',
       type: c.claimType?.name || 'Unknown',
       amount: parseFloat(c.amount),
@@ -554,6 +730,13 @@ const getEmptyManagerDashboard = () => ({
   teamStats: { totalMembers: 0, presentToday: 0, onLeave: 0, wfhToday: 0 },
   pendingApprovals: { leaves: 0, claims: 0, wfh: 0 },
   teamAttendance: [],
+  teamRoster: [],
+  weekAhead: {
+    thisWeek: { rangeLabel: '', days: [] },
+    nextWeek: { rangeLabel: '', days: [] },
+    coverageNote: 'No planned leave this week — full coverage'
+  },
+  teamPulse: { attendanceRate: 0, onTimeRate: 0, decisions: 0 },
   leavePendingApproval: [],
   claimsPendingApproval: [],
   wfhRequests: []

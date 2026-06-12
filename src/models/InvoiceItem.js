@@ -66,6 +66,20 @@ const InvoiceItem = sequelize.define('InvoiceItem', {
   unit_of_measurement: {
     type: DataTypes.STRING(10),
     defaultValue: 'EA'
+  },
+  // Per-line PO number — supports multi-PO invoices where each row maps to
+  // a different purchase order / project.
+  po_number: {
+    type: DataTypes.STRING(50),
+    allowNull: true
+  },
+  // Per-line project linkage — resolved from po_number on create/update.
+  // Lets a multi-PO invoice link each row to its own project while the
+  // invoice header keeps a single "primary" project_id (or none).
+  project_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: { model: 'projects', key: 'id' }
   }
 }, {
   tableName: 'invoice_items',

@@ -27,11 +27,28 @@ const Invoice = sequelize.define('Invoice', {
     type: DataTypes.STRING(30),
     allowNull: false
   },
+  // Optional manual title/reference — used mainly for "Recorded" invoices
+  // (old invoices entered for record-keeping, never submitted to LHDN).
+  title: {
+    type: DataTypes.STRING(255),
+    allowNull: true
+  },
   invoice_date: {
     type: DataTypes.DATEONLY,
     allowNull: false
   },
   due_date: {
+    type: DataTypes.DATEONLY,
+    allowNull: true
+  },
+  // Service / activity period the invoice covers — distinct from invoice_date,
+  // which is just the issue/printing date. Many service invoices are backdated
+  // or post-dated relative to the month of work being billed.
+  commence_date_start: {
+    type: DataTypes.DATEONLY,
+    allowNull: true
+  },
+  commence_date_end: {
     type: DataTypes.DATEONLY,
     allowNull: true
   },
@@ -54,7 +71,7 @@ const Invoice = sequelize.define('Invoice', {
     defaultValue: 1.000000
   },
   payment_terms: {
-    type: DataTypes.STRING(50),
+    type: DataTypes.TEXT,
     allowNull: true
   },
 
@@ -180,8 +197,9 @@ const Invoice = sequelize.define('Invoice', {
   },
 
   // Status & Workflow
+  // 'Recorded' = manually entered for record-keeping only; never submitted to LHDN.
   status: {
-    type: DataTypes.ENUM('Draft', 'Pending', 'Submitted', 'Valid', 'Invalid', 'Cancelled', 'Superseded'),
+    type: DataTypes.ENUM('Draft', 'Pending', 'Submitted', 'Valid', 'Invalid', 'Cancelled', 'Superseded', 'Recorded'),
     defaultValue: 'Draft'
   },
   approved_by: {

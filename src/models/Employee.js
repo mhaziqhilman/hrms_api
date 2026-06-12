@@ -145,6 +145,12 @@ const Employee = sequelize.define('Employee', {
     defaultValue: 'Active',
     field: 'employment_status'
   },
+  // Last working day. Set when the employee resigns/is terminated; null while Active.
+  end_date: {
+    type: DataTypes.DATEONLY,
+    allowNull: true,
+    field: 'end_date'
+  },
   work_location: {
     type: DataTypes.STRING(100),
     allowNull: true,

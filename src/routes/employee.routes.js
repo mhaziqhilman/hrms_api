@@ -70,6 +70,9 @@ const updateEmployeeValidation = [
     .optional({ values: 'falsy' })
     .isIn(['Active', 'Resigned', 'Terminated'])
     .withMessage('Invalid employment status'),
+  body('end_date')
+    .optional({ values: 'falsy' })
+    .isISO8601().withMessage('End date must be a valid date'),
   body('reporting_manager_id')
     .optional({ values: 'falsy' })
     .isInt({ min: 1 }).withMessage('Reporting manager ID must be a positive integer')
@@ -252,6 +255,29 @@ router.patch(
     validate
   ],
   employeeController.setWfhFlexible
+);
+
+/**
+ * @route   PATCH /api/employees/:id/status
+ * @desc    Change employment status (Active/Resigned/Terminated) + optional end date
+ * @access  Admin only
+ */
+router.patch(
+  '/:id/status',
+  verifyToken,
+  requireAdmin,
+  [
+    param('id').notEmpty().withMessage('ID is required'),
+    body('employment_status')
+      .notEmpty().withMessage('Employment status is required')
+      .isIn(['Active', 'Resigned', 'Terminated']).withMessage('Invalid employment status'),
+    body('end_date')
+      .optional({ values: 'falsy' })
+      .isISO8601().withMessage('End date must be a valid date'),
+    body('reason').optional().isString().withMessage('Reason must be a string'),
+    validate
+  ],
+  employeeController.setEmploymentStatus
 );
 
 /**
