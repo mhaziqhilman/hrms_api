@@ -4,6 +4,7 @@ const GitHubStrategy = require('passport-github2').Strategy;
 const { User, Employee, Company, UserCompany, Invitation } = require('../models');
 const { Op } = require('sequelize');
 const { linkEmployeeToUser } = require('../services/invitationService');
+const subscriptionService = require('../services/subscriptionService');
 const logger = require('../utils/logger');
 
 /**
@@ -59,6 +60,16 @@ const findOrCreateOAuthUser = async (profile, provider) => {
     });
 
     logger.info(`New user created via ${provider}: ${email}`);
+
+    // Auto-assign the default (Basic) subscription. Non-blocking.
+    try {
+      await subscriptionService.subscribe(user.id, process.env.DEFAULT_PACKAGE_SLUG || 'basic', {
+        action: 'created',
+        reason: `Auto-assigned on ${provider} signup`
+      });
+    } catch (subError) {
+      logger.error(`Failed to assign default subscription to ${email}: ${subError.message}`);
+    }
   }
 
   // Auto-accept pending invitations (same logic as login controller)

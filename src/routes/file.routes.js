@@ -3,6 +3,7 @@ const router = express.Router();
 const fileController = require('../controllers/fileController');
 const { verifyToken } = require('../middleware/auth.middleware');
 const { requireAdmin } = require('../middleware/rbac.middleware');
+const { requireFeature } = require('../middleware/packageMiddleware');
 const { upload } = require('../config/upload.config');
 const { body, param, query, validationResult } = require('express-validator');
 
@@ -66,6 +67,7 @@ router.post(
 router.get(
   '/overview',
   verifyToken,
+  requireFeature('document_management'),
   requireAdmin,
   fileController.getDocumentOverview
 );
@@ -249,6 +251,7 @@ router.put(
 router.patch(
   '/:id/verify',
   verifyToken,
+  requireFeature('document_management'),
   requireAdmin,
   idParamValidation,
   validate,

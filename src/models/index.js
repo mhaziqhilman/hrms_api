@@ -36,6 +36,11 @@ const Project = require('./Project');
 const Bill = require('./Bill');
 const BillItem = require('./BillItem');
 const BillPayment = require('./BillPayment');
+const Package = require('./Package');
+const Subscription = require('./Subscription');
+const SubscriptionHistory = require('./SubscriptionHistory');
+const CashFlowStatement = require('./CashFlowStatement');
+const CashFlowLine = require('./CashFlowLine');
 
 // Define associations
 
@@ -333,6 +338,32 @@ BillPayment.belongsTo(Bill, { foreignKey: 'bill_id', as: 'bill' });
 User.hasMany(BillPayment, { foreignKey: 'created_by', as: 'recorded_bill_payments' });
 BillPayment.belongsTo(User, { foreignKey: 'created_by', as: 'recorder' });
 
+// Subscription / Package associations
+// User has exactly one active Subscription
+User.hasOne(Subscription, { foreignKey: 'user_id', as: 'subscription' });
+Subscription.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
+// Subscription belongs to a Package (the tier)
+Package.hasMany(Subscription, { foreignKey: 'package_id', as: 'subscriptions' });
+Subscription.belongsTo(Package, { foreignKey: 'package_id', as: 'package' });
+
+// SubscriptionHistory — audit trail of plan changes
+User.hasMany(SubscriptionHistory, { foreignKey: 'user_id', as: 'subscription_history' });
+SubscriptionHistory.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+SubscriptionHistory.belongsTo(User, { foreignKey: 'changed_by', as: 'changer' });
+SubscriptionHistory.belongsTo(Package, { foreignKey: 'from_package_id', as: 'from_package' });
+SubscriptionHistory.belongsTo(Package, { foreignKey: 'to_package_id', as: 'to_package' });
+
+// CashFlow associations
+Company.hasMany(CashFlowStatement, { foreignKey: 'company_id', as: 'cash_flow_statements' });
+CashFlowStatement.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+User.hasMany(CashFlowStatement, { foreignKey: 'created_by', as: 'created_cash_flow_statements' });
+CashFlowStatement.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
+
+CashFlowStatement.hasMany(CashFlowLine, { foreignKey: 'statement_id', as: 'lines', onDelete: 'CASCADE' });
+CashFlowLine.belongsTo(CashFlowStatement, { foreignKey: 'statement_id', as: 'statement' });
+
 // Sync database
 const syncDatabase = async (options = {}) => {
   try {
@@ -383,5 +414,10 @@ module.exports = {
   Bill,
   BillItem,
   BillPayment,
+  Package,
+  Subscription,
+  SubscriptionHistory,
+  CashFlowStatement,
+  CashFlowLine,
   syncDatabase
 };

@@ -3,6 +3,7 @@ const { body } = require('express-validator');
 const companyController = require('../controllers/companyController');
 const { verifyToken } = require('../middleware/auth.middleware');
 const { requireAdmin, requireRole } = require('../middleware/rbac.middleware');
+const { requireFeature, enforceLimit, countOwnedCompanies } = require('../middleware/packageMiddleware');
 const { validate } = require('../middleware/validation.middleware');
 const { upload } = require('../config/upload.config');
 const storageService = require('../services/supabaseStorageService');
@@ -27,6 +28,7 @@ router.get('/all', verifyToken, requireSuperAdmin, companyController.getAllCompa
 router.post(
   '/setup',
   verifyToken,
+  enforceLimit('max_companies', countOwnedCompanies),
   [
     body('company.name').notEmpty().withMessage('Company name is required'),
     body('company.registration_no').optional(),
@@ -50,7 +52,7 @@ router.post(
  * @desc    Get all companies the user belongs to
  * @access  Private
  */
-router.get('/my-companies', verifyToken, companyController.getMyCompanies);
+router.get('/my-companies', verifyToken, requireFeature('multi_company'), companyController.getMyCompanies);
 
 /**
  * @route   POST /api/company/switch
@@ -60,6 +62,7 @@ router.get('/my-companies', verifyToken, companyController.getMyCompanies);
 router.post(
   '/switch',
   verifyToken,
+  requireFeature('multi_company'),
   [
     body('company_id').isInt().withMessage('Company ID is required'),
     validate

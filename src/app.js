@@ -10,6 +10,8 @@ const { configurePassport } = require('./config/passport');
 
 const { testConnection, sequelize } = require('./config/database');
 const { errorHandler, notFound } = require('./middleware/error.middleware');
+const { verifyToken } = require('./middleware/auth.middleware');
+const { requireFeature } = require('./middleware/packageMiddleware');
 const logger = require('./utils/logger');
 
 // Import routes
@@ -45,6 +47,10 @@ const invoiceRoutes = require('./routes/invoice.routes');
 const projectRoutes = require('./routes/project.routes');
 const billRoutes = require('./routes/bill.routes');
 const financeRoutes = require('./routes/finance.routes');
+const cashFlowRoutes = require('./routes/cashflow.routes');
+const packageRoutes = require('./routes/package.routes');
+const subscriptionRoutes = require('./routes/subscription.routes');
+const adminSubscriptionRoutes = require('./routes/adminSubscription.routes');
 
 // Initialize express app
 const app = express();
@@ -184,17 +190,19 @@ app.get('/health', (req, res) => {
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/employees', employeeRoutes);
-app.use('/api/payroll', payrollRoutes);
-app.use('/api/payruns', payRunRoutes);
+// Module-wide tier gates. verifyToken is prepended so requireFeature has
+// req.user when PACKAGE_ENFORCEMENT=true; both are pass-throughs while it's off.
+app.use('/api/payroll', verifyToken, requireFeature('payroll'), payrollRoutes);
+app.use('/api/payruns', verifyToken, requireFeature('payroll'), payRunRoutes);
 app.use('/api/leaves', leaveRoutes);
 app.use('/api/attendance', attendanceRoutes);
-app.use('/api/claims', claimRoutes);
+app.use('/api/claims', verifyToken, requireFeature('claims'), claimRoutes);
 app.use('/api/claim-types', claimTypeRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/memos', memoRoutes);
 app.use('/api/policies', policyRoutes);
-app.use('/api/statutory-reports', statutoryReportsRoutes);
-app.use('/api/analytics', analyticsRoutes);
+app.use('/api/statutory-reports', verifyToken, requireFeature('statutory_reports'), statutoryReportsRoutes);
+app.use('/api/analytics', verifyToken, requireFeature('analytics'), analyticsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/users', userManagementRoutes);
 app.use('/api/settings', settingsRoutes);
@@ -209,12 +217,16 @@ app.use('/api/leave-entitlements', leaveEntitlementRoutes);
 app.use('/api/announcement-categories', announcementCategoryRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/feedback', feedbackRoutes);
-app.use('/api/audit-logs', auditLogRoutes);
+app.use('/api/audit-logs', verifyToken, requireFeature('audit_log'), auditLogRoutes);
 
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/bills', billRoutes);
 app.use('/api/finance', financeRoutes);
+app.use('/api/cashflow', cashFlowRoutes);
+app.use('/api/packages', packageRoutes);
+app.use('/api/subscription', subscriptionRoutes);
+app.use('/api/admin/subscriptions', adminSubscriptionRoutes);
 
 // 404 handler
 app.use(notFound);
@@ -244,6 +256,10 @@ const startServer = async () => {
       await sequelize.sync({ alter: true });
       logger.info('Database models synchronized');
     }
+
+    // Start background jobs (subscription trial/period maintenance)
+    const { startSubscriptionJobs } = require('./jobs/subscriptionJobs');
+    startSubscriptionJobs();
 
     // Start server
     app.listen(PORT, () => {

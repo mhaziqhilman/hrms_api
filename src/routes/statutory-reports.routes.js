@@ -18,6 +18,13 @@ const adminAccess = requireRole(['super_admin', 'admin']);
 router.get('/periods', adminAccess, statutoryReportsController.getAvailablePeriods);
 
 /**
+ * @route   GET /api/statutory-reports/summary/:year
+ * @desc    Consolidated statutory expenses summary for a whole year
+ * @access  Admin, Super Admin
+ */
+router.get('/summary/:year', adminAccess, statutoryReportsController.getStatutorySummary);
+
+/**
  * EA Form Routes (Annual)
  */
 

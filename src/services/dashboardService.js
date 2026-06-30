@@ -83,6 +83,12 @@ const getAdminDashboard = async (companyId) => {
       [fn('SUM', col('gross_salary')), 'total_gross'],
       [fn('SUM', literal('epf_employee + socso_employee + eis_employee')), 'total_statutory'],
       [fn('SUM', col('pcb_deduction')), 'total_pcb'],
+      [fn('SUM', col('epf_employee')), 'total_epf_employee'],
+      [fn('SUM', col('epf_employer')), 'total_epf_employer'],
+      [fn('SUM', col('socso_employee')), 'total_socso_employee'],
+      [fn('SUM', col('socso_employer')), 'total_socso_employer'],
+      [fn('SUM', col('eis_employee')), 'total_eis_employee'],
+      [fn('SUM', col('eis_employer')), 'total_eis_employer'],
       [fn('SUM', col('net_salary')), 'total_net']
     ],
     where: {
@@ -119,6 +125,12 @@ const getAdminDashboard = async (companyId) => {
       [fn('SUM', col('gross_salary')), 'total_gross'],
       [fn('SUM', literal('epf_employee + socso_employee + eis_employee')), 'total_statutory'],
       [fn('SUM', col('pcb_deduction')), 'total_pcb'],
+      [fn('SUM', col('epf_employee')), 'total_epf_employee'],
+      [fn('SUM', col('epf_employer')), 'total_epf_employer'],
+      [fn('SUM', col('socso_employee')), 'total_socso_employee'],
+      [fn('SUM', col('socso_employer')), 'total_socso_employer'],
+      [fn('SUM', col('eis_employee')), 'total_eis_employee'],
+      [fn('SUM', col('eis_employer')), 'total_eis_employer'],
       [fn('SUM', col('net_salary')), 'total_net']
     ],
     where: {
@@ -135,10 +147,17 @@ const getAdminDashboard = async (companyId) => {
     gross: parseFloat(r.total_gross) || 0,
     statutory: parseFloat(r.total_statutory) || 0,
     pcb: parseFloat(r.total_pcb) || 0,
-    net: parseFloat(r.total_net) || 0
+    net: parseFloat(r.total_net) || 0,
+    epfEmployee: parseFloat(r.total_epf_employee) || 0,
+    epfEmployer: parseFloat(r.total_epf_employer) || 0,
+    socsoEmployee: parseFloat(r.total_socso_employee) || 0,
+    socsoEmployer: parseFloat(r.total_socso_employer) || 0,
+    eisEmployee: parseFloat(r.total_eis_employee) || 0,
+    eisEmployer: parseFloat(r.total_eis_employer) || 0
   }]));
+  const emptyTrend = { gross: 0, statutory: 0, pcb: 0, net: 0, epfEmployee: 0, epfEmployer: 0, socsoEmployee: 0, socsoEmployer: 0, eisEmployee: 0, eisEmployer: 0 };
   const payrollTrend = trendMonths.map((t, i) => {
-    const row = trendMap.get(`${t.year}-${t.month}`) || { gross: 0, statutory: 0, pcb: 0, net: 0 };
+    const row = trendMap.get(`${t.year}-${t.month}`) || emptyTrend;
     return {
       year: t.year,
       month: t.month,
@@ -147,6 +166,12 @@ const getAdminDashboard = async (companyId) => {
       gross: row.gross,
       statutory: row.statutory,
       pcb: row.pcb,
+      epfEmployee: row.epfEmployee,
+      epfEmployer: row.epfEmployer,
+      socsoEmployee: row.socsoEmployee,
+      socsoEmployer: row.socsoEmployer,
+      eisEmployee: row.eisEmployee,
+      eisEmployer: row.eisEmployer,
       isCurrent: i === trendMonths.length - 1
     };
   });
@@ -305,7 +330,14 @@ const getAdminDashboard = async (companyId) => {
       totalGrossSalary: parseFloat(payrollSummary?.total_gross || 0),
       totalStatutory: parseFloat(payrollSummary?.total_statutory || 0),
       totalPCB: parseFloat(payrollSummary?.total_pcb || 0),
-      totalNetSalary: parseFloat(payrollSummary?.total_net || 0)
+      totalNetSalary: parseFloat(payrollSummary?.total_net || 0),
+      epfEmployee: parseFloat(payrollSummary?.total_epf_employee || 0),
+      epfEmployer: parseFloat(payrollSummary?.total_epf_employer || 0),
+      socsoEmployee: parseFloat(payrollSummary?.total_socso_employee || 0),
+      socsoEmployer: parseFloat(payrollSummary?.total_socso_employer || 0),
+      eisEmployee: parseFloat(payrollSummary?.total_eis_employee || 0),
+      eisEmployer: parseFloat(payrollSummary?.total_eis_employer || 0),
+      pcbEmployee: parseFloat(payrollSummary?.total_pcb || 0)
     },
     payrollTrend,
     claimsPendingPayment: claimsPendingPayment.map(c => ({

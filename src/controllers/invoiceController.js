@@ -663,8 +663,8 @@ const recordPayment = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Invoice not found' });
     }
 
-    if (!['Valid', 'Pending', 'Submitted'].includes(invoice.status)) {
-      return res.status(400).json({ success: false, message: 'Payments can only be recorded for Valid/Pending/Submitted invoices' });
+    if (!['Valid', 'Pending', 'Submitted', 'Recorded'].includes(invoice.status)) {
+      return res.status(400).json({ success: false, message: 'Payments can only be recorded for Valid/Pending/Submitted/Recorded invoices' });
     }
 
     const { payment_date, amount, payment_method, reference_number, notes } = req.body;

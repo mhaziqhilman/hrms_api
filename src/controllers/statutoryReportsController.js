@@ -1132,6 +1132,163 @@ exports.downloadCSV = async (req, res, next) => {
 };
 
 /**
+ * Get a consolidated statutory expenses summary for a whole year.
+ *
+ * Unlike the per-type forms (EPF Borang A, SOCSO 8A, etc.) this rolls every
+ * statutory component into a single view so admins can see, in one page, how
+ * much statutory cost the company carries and what is driving it.
+ *
+ * Key figures returned:
+ *   - employer_statutory  = employer EPF + SOCSO + EIS  (the EXTRA cost on top of
+ *                           gross salary — this is what eats into profit)
+ *   - employee_deductions = employee EPF + SOCSO + EIS + PCB (withheld from pay,
+ *                           the company only remits it)
+ *   - total_remitted      = all statutory cash sent to the authorities
+ *   - total_staff_cost    = gross salary + employer_statutory (full cost of employment)
+ */
+exports.getStatutorySummary = async (req, res, next) => {
+  try {
+    const { year } = req.params;
+
+    const payrollRecords = await Payroll.findAll({
+      where: {
+        year: parseInt(year),
+        status: { [Op.in]: ['Approved', 'Paid'] }
+      },
+      include: [{
+        model: Employee,
+        as: 'employee',
+        attributes: ['id', 'employee_id', 'full_name'],
+        where: { company_id: req.user.company_id },
+        required: true
+      }],
+      order: [['month', 'ASC'], ['employee', 'full_name', 'ASC']]
+    });
+
+    const num = (v) => parseFloat(v) || 0;
+
+    // Per-month accumulator (1..12) and per-employee accumulator
+    const monthMap = new Map();
+    const employeeMap = new Map();
+
+    const emptyBucket = () => ({
+      gross: 0,
+      epf_employee: 0, epf_employer: 0,
+      socso_employee: 0, socso_employer: 0,
+      eis_employee: 0, eis_employer: 0,
+      pcb: 0,
+      net_salary: 0
+    });
+
+    for (const r of payrollRecords) {
+      const m = parseInt(r.month, 10);
+      if (!monthMap.has(m)) monthMap.set(m, emptyBucket());
+      const mb = monthMap.get(m);
+
+      const empKey = r.employee.id;
+      if (!employeeMap.has(empKey)) {
+        employeeMap.set(empKey, {
+          employee_id: r.employee.employee_id,
+          full_name: r.employee.full_name,
+          months_count: 0,
+          ...emptyBucket()
+        });
+      }
+      const eb = employeeMap.get(empKey);
+      eb.months_count += 1;
+
+      const fields = ['gross', 'epf_employee', 'epf_employer', 'socso_employee',
+        'socso_employer', 'eis_employee', 'eis_employer', 'pcb', 'net_salary'];
+      const vals = {
+        gross: num(r.gross_salary),
+        epf_employee: num(r.epf_employee),
+        epf_employer: num(r.epf_employer),
+        socso_employee: num(r.socso_employee),
+        socso_employer: num(r.socso_employer),
+        eis_employee: num(r.eis_employee),
+        eis_employer: num(r.eis_employer),
+        pcb: num(r.pcb_deduction),
+        net_salary: num(r.net_salary)
+      };
+      for (const f of fields) {
+        mb[f] += vals[f];
+        eb[f] += vals[f];
+      }
+    }
+
+    // Derive the composite figures for a raw bucket
+    const decorate = (b) => {
+      const epf_total = b.epf_employee + b.epf_employer;
+      const socso_total = b.socso_employee + b.socso_employer;
+      const eis_total = b.eis_employee + b.eis_employer;
+      const employer_statutory = b.epf_employer + b.socso_employer + b.eis_employer;
+      const employee_deductions = b.epf_employee + b.socso_employee + b.eis_employee + b.pcb;
+      const total_remitted = epf_total + socso_total + eis_total + b.pcb;
+      const total_staff_cost = b.gross + employer_statutory;
+      return {
+        gross: roundToTwo(b.gross),
+        epf_employee: roundToTwo(b.epf_employee),
+        epf_employer: roundToTwo(b.epf_employer),
+        epf_total: roundToTwo(epf_total),
+        socso_employee: roundToTwo(b.socso_employee),
+        socso_employer: roundToTwo(b.socso_employer),
+        socso_total: roundToTwo(socso_total),
+        eis_employee: roundToTwo(b.eis_employee),
+        eis_employer: roundToTwo(b.eis_employer),
+        eis_total: roundToTwo(eis_total),
+        pcb: roundToTwo(b.pcb),
+        net_salary: roundToTwo(b.net_salary),
+        employer_statutory: roundToTwo(employer_statutory),
+        employee_deductions: roundToTwo(employee_deductions),
+        total_remitted: roundToTwo(total_remitted),
+        total_staff_cost: roundToTwo(total_staff_cost)
+      };
+    };
+
+    // Build month rows (only months that have data), sorted ascending
+    const months = Array.from(monthMap.keys())
+      .sort((a, b) => a - b)
+      .map(m => ({ month: m, ...decorate(monthMap.get(m)) }));
+
+    // Grand totals across all buckets
+    const grand = emptyBucket();
+    for (const b of monthMap.values()) {
+      for (const k of Object.keys(grand)) grand[k] += b[k];
+    }
+    const totals = decorate(grand);
+
+    // Per-employee rows for the year, heaviest cost first
+    const employees = Array.from(employeeMap.values())
+      .map(e => ({
+        employee_id: e.employee_id,
+        full_name: e.full_name,
+        months_count: e.months_count,
+        ...decorate(e)
+      }))
+      .sort((a, b) => b.total_staff_cost - a.total_staff_cost);
+
+    const companyInfo = await getCompanyInfo(req.user.id);
+
+    logger.info(`Statutory expenses summary generated for ${year}`, { user_id: req.user.id });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        year: parseInt(year),
+        employer: { name: companyInfo.name },
+        months,
+        totals,
+        employees,
+        employee_count: employees.length
+      }
+    });
+  } catch (error) {
+    logger.error('Error generating statutory summary:', error);
+    next(error);
+  }
+};
+
+/**
  * Get available report periods (years and months with payroll data)
  */
 exports.getAvailablePeriods = async (req, res, next) => {

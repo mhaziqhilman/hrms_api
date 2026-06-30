@@ -183,6 +183,10 @@ const sumPayroll = async (companyId, from, to) => {
     attributes: [
       [fn('COALESCE', fn('SUM', col('gross_salary')), 0), 'gross'],
       [fn('SUM', literal(`CASE WHEN "Payroll"."status" = 'Paid' THEN "Payroll"."net_salary" ELSE 0 END`)), 'net_paid'],
+      // True company cash cost (Paid only): gross already contains employee deductions (EPF/SOCSO/EIS/PCB)
+      // which the company remits, plus employer statutory contributions paid on top of gross.
+      [fn('SUM', literal(`CASE WHEN "Payroll"."status" = 'Paid' THEN ("Payroll"."epf_employer" + "Payroll"."socso_employer" + "Payroll"."eis_employer") ELSE 0 END`)), 'employer_contrib_paid'],
+      [fn('SUM', literal(`CASE WHEN "Payroll"."status" = 'Paid' THEN ("Payroll"."gross_salary" + "Payroll"."epf_employer" + "Payroll"."socso_employer" + "Payroll"."eis_employer") ELSE 0 END`)), 'total_cost_paid'],
       [fn('COUNT', col('Payroll.id')), 'count']
     ],
     raw: true
@@ -190,6 +194,8 @@ const sumPayroll = async (companyId, from, to) => {
   return {
     gross: parseFloat(result.gross || 0),
     net_paid: parseFloat(result.net_paid || 0),
+    employer_contrib_paid: parseFloat(result.employer_contrib_paid || 0),
+    total_cost_paid: parseFloat(result.total_cost_paid || 0),
     count: parseInt(result.count || 0, 10)
   };
 };
@@ -209,11 +215,13 @@ const getPnl = async (companyId, { project_id = null, from = null, to = null, in
     sumBills(companyId, projectInternalId, from, to),
     // Claims aren't tied to a single date the same way; only filter by project if one is given
     sumClaims(companyId, projectInternalId, from, to),
-    include_payroll && !projectInternalId ? sumPayroll(companyId, from, to) : Promise.resolve({ gross: 0, net_paid: 0, count: 0 })
+    include_payroll && !projectInternalId ? sumPayroll(companyId, from, to) : Promise.resolve({ gross: 0, net_paid: 0, employer_contrib_paid: 0, total_cost_paid: 0, count: 0 })
   ]);
 
   const realized_revenue = invoices.received;
-  const realized_expense = bills.paid + claims.paid + payroll.net_paid;
+  // Payroll cash cost = full company outflow (gross incl. employee statutory deductions the company remits
+  // + employer EPF/SOCSO/EIS contributions), NOT just net pay handed to employees.
+  const realized_expense = bills.paid + claims.paid + payroll.total_cost_paid;
   const realized_profit = parseFloat((realized_revenue - realized_expense).toFixed(2));
 
   const unrealized_revenue = invoices.receivable;

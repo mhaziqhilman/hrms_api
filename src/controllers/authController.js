@@ -8,6 +8,7 @@ const { generateRandomString } = require('../utils/helpers');
 const { linkEmployeeToUser } = require('../services/invitationService');
 const logger = require('../utils/logger');
 const tokenBlacklist = require('../utils/tokenBlacklist');
+const subscriptionService = require('../services/subscriptionService');
 
 /**
  * Generate JWT access token (short-lived)
@@ -73,6 +74,17 @@ const register = async (req, res, next) => {
       email_verification_token: hashedVerificationToken,
       email_verification_expires: new Date(Date.now() + 24 * 60 * 60 * 1000) // 24 hours
     });
+
+    // Auto-assign the default (Basic) subscription on signup.
+    // Non-blocking: a subscription hiccup must not fail registration.
+    try {
+      await subscriptionService.subscribe(user.id, process.env.DEFAULT_PACKAGE_SLUG || 'basic', {
+        action: 'created',
+        reason: 'Auto-assigned on registration'
+      });
+    } catch (subError) {
+      logger.error(`Failed to assign default subscription to ${email}: ${subError.message}`);
+    }
 
     // Generate auth token
     const token = generateToken(user);

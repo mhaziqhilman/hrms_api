@@ -3,6 +3,7 @@ const router = express.Router();
 const employeeController = require('../controllers/employeeController');
 const { verifyToken } = require('../middleware/auth.middleware');
 const { requireAdmin, requireManager } = require('../middleware/rbac.middleware');
+const { enforceLimit, countEmployeesInActiveCompany } = require('../middleware/packageMiddleware');
 const { body, query, param } = require('express-validator');
 const { validate } = require('../middleware/validation.middleware');
 
@@ -219,6 +220,7 @@ router.post(
   '/',
   verifyToken,
   requireAdmin,
+  enforceLimit('max_employees_per_company', countEmployeesInActiveCompany),
   [...createEmployeeValidation, validate],
   employeeController.createEmployee
 );
