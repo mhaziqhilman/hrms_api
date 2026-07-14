@@ -13,6 +13,7 @@ const { calculateAllStatutory, getCompanyRates } = require('../utils/statutoryCa
 const { sendPayslipNotification, shouldSendEmail } = require('../services/emailService');
 const storageService = require('../services/supabaseStorageService');
 const auditService = require('../services/auditService');
+const overtimeService = require('../services/overtimeService');
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -177,7 +178,6 @@ exports.calculatePayroll = async (req, res, next) => {
       month,
       basic_salary: form_basic_salary,
       allowances = 0,
-      overtime_pay = 0,
       bonus = 0,
       commission = 0,
       unpaid_leave_deduction = 0,
@@ -250,6 +250,17 @@ exports.calculatePayroll = async (req, res, next) => {
         success: false,
         message: `Cannot add to a pay run that is already ${payRun.status}`
       });
+    }
+
+    // Auto-sum approved (unconsumed) overtime for this employee+period unless a
+    // value was supplied explicitly. Records are marked consumed after the
+    // payroll row is created so the same OT is never paid twice.
+    let overtime_pay = req.body.overtime_pay;
+    let consumedOtIds = [];
+    if (overtime_pay == null) {
+      const otRecords = await overtimeService.getApprovedOTRecords(employee.id, year, month, { transaction });
+      overtime_pay = otRecords.reduce((sum, r) => sum + parseFloat(r.amount || 0), 0);
+      consumedOtIds = otRecords.map(r => r.id);
     }
 
     // Calculate gross salary
@@ -349,6 +360,9 @@ exports.calculatePayroll = async (req, res, next) => {
       notes,
       processed_by: req.user.id
     }, { transaction });
+
+    // Mark the approved OT that fed this payroll as consumed
+    await overtimeService.markConsumed(consumedOtIds, payroll.id, transaction);
 
     // Update or create YTD Statutory record
     await updateYTDStatutory(employee.id, year, month, statutory, gross_salary, net_salary, transaction);
@@ -1777,7 +1791,10 @@ exports.bulkPreview = async (req, res, next) => {
 
       const basic_salary = input.basic_salary != null ? parseFloat(input.basic_salary) : parseFloat(employee.basic_salary);
       const allowances = parseFloat(input.allowances || 0);
-      const overtime_pay = parseFloat(input.overtime_pay || 0);
+      // Auto-sum approved overtime unless a value is supplied (preview: don't consume)
+      const overtime_pay = input.overtime_pay != null
+        ? parseFloat(input.overtime_pay)
+        : await overtimeService.getApprovedOTTotal(employee.id, year, month);
       const bonus = parseFloat(input.bonus || 0);
       const commission = parseFloat(input.commission || 0);
       const unpaid_leave_deduction = parseFloat(input.unpaid_leave_deduction || 0);
@@ -1958,7 +1975,16 @@ exports.bulkCalculatePayroll = async (req, res, next) => {
 
         const basic_salary = input.basic_salary != null ? parseFloat(input.basic_salary) : parseFloat(employee.basic_salary);
         const allowances = parseFloat(input.allowances || 0);
-        const overtime_pay = parseFloat(input.overtime_pay || 0);
+        // Auto-sum approved (unconsumed) overtime unless a value is supplied
+        let overtime_pay = input.overtime_pay;
+        let consumedOtIds = [];
+        if (overtime_pay == null) {
+          const otRecords = await overtimeService.getApprovedOTRecords(employee.id, year, month, { transaction });
+          overtime_pay = otRecords.reduce((sum, r) => sum + parseFloat(r.amount || 0), 0);
+          consumedOtIds = otRecords.map(r => r.id);
+        } else {
+          overtime_pay = parseFloat(overtime_pay);
+        }
         const bonus = parseFloat(input.bonus || 0);
         const commission = parseFloat(input.commission || 0);
         const unpaid_leave_deduction = parseFloat(input.unpaid_leave_deduction || 0);
@@ -2046,6 +2072,9 @@ exports.bulkCalculatePayroll = async (req, res, next) => {
         }, { transaction });
 
         await updateYTDStatutory(employee.id, year, month, statutory, gross_salary, net_salary, transaction);
+
+        // Mark the approved OT that fed this payroll as consumed
+        await overtimeService.markConsumed(consumedOtIds, payroll.id, transaction);
 
         results.push({
           employee_id: input.employee_id,

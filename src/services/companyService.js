@@ -1,5 +1,6 @@
 const { sequelize, Company, User, Employee, UserCompany } = require('../models');
 const logger = require('../utils/logger');
+const { isEmployeeOffboarded, findGateEmployee } = require('../utils/employmentAccess');
 
 /**
  * Create a company with initial employee (transactional)
@@ -173,7 +174,7 @@ const getAllCompanies = async () => {
  */
 const switchCompany = async (userId, companyId) => {
   // Fetch current user to check role
-  const currentUser = await User.findByPk(userId, { attributes: ['id', 'role'] });
+  const currentUser = await User.findByPk(userId, { attributes: ['id', 'role', 'email'] });
   if (!currentUser) throw new Error('User not found');
 
   const isSuperAdmin = currentUser.role === 'super_admin';
@@ -188,6 +189,14 @@ const switchCompany = async (userId, companyId) => {
       where: { user_id: userId, company_id: companyId, status: 'active' }
     });
     if (!membership) throw new Error('You are not a member of this company');
+
+    // Block switching into a company where the user's employment has ended
+    // (covers both linked and unlinked-but-email-matched employee profiles)
+    const { gate } = await findGateEmployee(userId, companyId, currentUser.email);
+    if (isEmployeeOffboarded(gate)) {
+      throw new Error('Your employment with this company has ended');
+    }
+
     membershipRole = membership.role;
   }
 

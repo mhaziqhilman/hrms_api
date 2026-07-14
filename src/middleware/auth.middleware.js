@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const jwtConfig = require('../config/jwt');
 const { User, Employee } = require('../models');
 const tokenBlacklist = require('../utils/tokenBlacklist');
+const { checkCompanyAccess, OFFBOARD_MESSAGES } = require('../utils/employmentAccess');
 
 /**
  * Verify JWT token and attach user to request
@@ -71,14 +72,28 @@ const verifyToken = async (req, res, next) => {
       req.user.company_id = decoded.company_id;
     }
 
-    // Look up employee_id for the active/viewing company
+    // Look up employee_id for the active/viewing company and enforce that
+    // the user still belongs to it (membership exists, employment not ended).
+    // super_admin is exempt: their company_id is a viewing context, not a membership.
     const activeCompanyId = req.user.company_id;
     if (activeCompanyId) {
-      const employee = await Employee.findOne({
-        where: { user_id: user.id, company_id: activeCompanyId },
-        attributes: ['id']
-      });
-      req.user.employee_id = employee ? employee.id : null;
+      if (user.role === 'super_admin') {
+        const employee = await Employee.findOne({
+          where: { user_id: user.id, company_id: activeCompanyId },
+          attributes: ['id']
+        });
+        req.user.employee_id = employee ? employee.id : null;
+      } else {
+        const access = await checkCompanyAccess(user.id, activeCompanyId, { role: user.role, email: user.email });
+        if (!access.allowed) {
+          return res.status(403).json({
+            success: false,
+            code: access.code,
+            message: OFFBOARD_MESSAGES[access.code]
+          });
+        }
+        req.user.employee_id = access.employee ? access.employee.id : null;
+      }
     } else {
       req.user.employee_id = null;
     }

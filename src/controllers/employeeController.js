@@ -5,6 +5,37 @@ const { Op } = require('sequelize');
 const { sequelize } = require('../config/database');
 const logger = require('../utils/logger');
 const auditService = require('../services/auditService');
+const { isEmployeeOffboarded } = require('../utils/employmentAccess');
+
+/**
+ * When an offboarding takes effect immediately (past/no last working day),
+ * revoke the affected user's refresh token so silent re-auth stops. Their
+ * access tokens die at the auth middleware, which checks status per request.
+ * For an unlinked profile, the user is resolved by email — the same match
+ * the access gate uses.
+ */
+const revokeUserSessionIfOffboarded = async (employee) => {
+  if (!isEmployeeOffboarded(employee)) return;
+
+  let userId = employee.user_id;
+  if (!userId && employee.email) {
+    const matchedUser = await User.findOne({
+      where: sequelize.where(
+        sequelize.fn('lower', sequelize.col('email')),
+        employee.email.toLowerCase()
+      ),
+      attributes: ['id']
+    });
+    userId = matchedUser ? matchedUser.id : null;
+  }
+  if (!userId) return;
+
+  await User.update(
+    { refresh_token: null, refresh_token_expires_at: null },
+    { where: { id: userId } }
+  );
+  logger.info(`Revoked refresh token for user ${userId} (employee ${employee.id} offboarded)`);
+};
 
 /**
  * Get all employees with pagination and filtering
@@ -562,6 +593,8 @@ exports.setEmploymentStatus = async (req, res, next) => {
 
     await employee.update(updates);
 
+    await revokeUserSessionIfOffboarded(employee);
+
     logger.info(`Employee ${id} status changed to ${employment_status}`, {
       employee_id: id,
       end_date: updates.end_date,
@@ -620,6 +653,8 @@ exports.deleteEmployee = async (req, res, next) => {
     await employee.update({
       employment_status: status
     });
+
+    await revokeUserSessionIfOffboarded(employee);
 
     logger.info(`Employee ${id} status changed to ${status}`, {
       employee_id: id,

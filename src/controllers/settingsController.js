@@ -305,7 +305,7 @@ const getAccountInfo = async (req, res, next) => {
     const userId = req.user.id;
 
     const user = await User.findByPk(userId, {
-      attributes: ['id', 'email', 'role', 'is_active', 'last_login_at', 'created_at'],
+      attributes: ['id', 'email', 'role', 'is_active', 'last_login_at', 'created_at', 'avatar_url'],
       include: [{
         model: Employee,
         as: 'employee',
@@ -328,6 +328,11 @@ const getAccountInfo = async (req, res, next) => {
       } catch (err) {
         logger.warn(`Failed to get signed URL for profile picture: ${err.message}`);
       }
+    }
+
+    // No HR-uploaded photo → fall back to the Nextura ID avatar (from OAuth login)
+    if (!photo_url && user.avatar_url) {
+      photo_url = user.avatar_url;
     }
 
     res.json({

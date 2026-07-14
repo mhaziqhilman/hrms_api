@@ -128,6 +128,23 @@ router.put(
 );
 
 /**
+ * @route   DELETE /api/users/:id/company-membership
+ * @desc    Remove user from the active company (offboarding: deletes membership,
+ *          detaches employee profile, revokes refresh token)
+ * @access  Super Admin + Admin
+ */
+router.delete(
+  '/:id/company-membership',
+  verifyToken,
+  requireAdminAccess,
+  [
+    param('id').isInt({ min: 1 }).withMessage('User ID must be a positive integer'),
+    validate
+  ],
+  userManagementController.removeUserFromCompany
+);
+
+/**
  * @route   PUT /api/users/:id/reset-password
  * @desc    Admin reset of user password
  * @access  Super Admin + Admin

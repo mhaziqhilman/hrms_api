@@ -41,6 +41,7 @@ const Subscription = require('./Subscription');
 const SubscriptionHistory = require('./SubscriptionHistory');
 const CashFlowStatement = require('./CashFlowStatement');
 const CashFlowLine = require('./CashFlowLine');
+const Overtime = require('./Overtime');
 
 // Define associations
 
@@ -364,6 +365,22 @@ CashFlowStatement.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
 CashFlowStatement.hasMany(CashFlowLine, { foreignKey: 'statement_id', as: 'lines', onDelete: 'CASCADE' });
 CashFlowLine.belongsTo(CashFlowStatement, { foreignKey: 'statement_id', as: 'statement' });
 
+// Overtime associations
+Company.hasMany(Overtime, { foreignKey: 'company_id', as: 'overtime_requests' });
+Overtime.belongsTo(Company, { foreignKey: 'company_id', as: 'company' });
+
+Employee.hasMany(Overtime, { foreignKey: 'employee_id', as: 'overtime_requests' });
+Overtime.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
+
+User.hasMany(Overtime, { foreignKey: 'manager_approved_by', as: 'approved_overtime' });
+Overtime.belongsTo(User, { foreignKey: 'manager_approved_by', as: 'approver' });
+
+Attendance.hasMany(Overtime, { foreignKey: 'attendance_id', as: 'overtime_requests' });
+Overtime.belongsTo(Attendance, { foreignKey: 'attendance_id', as: 'attendance' });
+
+Payroll.hasMany(Overtime, { foreignKey: 'payroll_id', as: 'overtime_records' });
+Overtime.belongsTo(Payroll, { foreignKey: 'payroll_id', as: 'payroll' });
+
 // Sync database
 const syncDatabase = async (options = {}) => {
   try {
@@ -419,5 +436,6 @@ module.exports = {
   SubscriptionHistory,
   CashFlowStatement,
   CashFlowLine,
+  Overtime,
   syncDatabase
 };

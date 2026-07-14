@@ -1,5 +1,6 @@
 const { Attendance, Employee, WFHApplication, User } = require('../models');
 const notificationService = require('../services/notificationService');
+const attendanceAutoClose = require('../services/attendanceAutoCloseService');
 const logger = require('../utils/logger');
 const { Op } = require('sequelize');
 const { sequelize } = require('../config/database');
@@ -66,6 +67,14 @@ exports.clockIn = async (req, res, next) => {
         success: false,
         message: 'You can only clock in for yourself'
       });
+    }
+
+    // Safety net: if the employee forgot to clock out on a previous day and the
+    // window has passed, auto-close it now (at 6 PM) before starting today.
+    try {
+      await attendanceAutoClose.closeStaleForEmployee(employee.id);
+    } catch (err) {
+      logger.warn(`Auto clock-out on clock-in failed for employee ${employee_id}: ${err.message}`);
     }
 
     const today = getTodayDate();
@@ -212,9 +221,13 @@ exports.clockOut = async (req, res, next) => {
 
       if (openYesterday) {
         if (localNow.getHours() >= CROSS_DAY_CLOCK_OUT_CUTOFF_HOUR) {
-          return res.status(409).json({
-            success: false,
-            message: `Clock-out window has passed. You must clock out before ${CROSS_DAY_CLOCK_OUT_CUTOFF_HOUR}:00 AM the next day.`
+          // Window passed — instead of blocking, auto-record the clock-out at
+          // office end (6 PM) so the session isn't left dangling.
+          const closed = await attendanceAutoClose.closeRecord(openYesterday);
+          return res.status(200).json({
+            success: true,
+            message: `The clock-out window (before ${CROSS_DAY_CLOCK_OUT_CUTOFF_HOUR}:00 AM) had passed, so we recorded your clock-out at 6:00 PM for ${openYesterday.date}. Contact your manager if this needs adjusting.`,
+            data: closed
           });
         }
         attendance = openYesterday;

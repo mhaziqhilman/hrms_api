@@ -2,7 +2,7 @@ const express = require('express');
 const { body } = require('express-validator');
 const passport = require('passport');
 const authController = require('../controllers/authController');
-const { oauthCallback } = require('../controllers/oauthController');
+const { oauthCallback, buildOAuthState } = require('../controllers/oauthController');
 const { verifyToken } = require('../middleware/auth.middleware');
 const { validate } = require('../middleware/validation.middleware');
 
@@ -156,6 +156,21 @@ router.post(
 router.post('/resend-verification', verifyToken, authController.resendVerification);
 
 // ==================== OAuth Routes ====================
+// Initiation accepts ?returnTo=<allowlisted receiver URL> (e.g. the Nextura
+// hub) and an optional ?next=<in-app path>; both ride in an HMAC-signed
+// `state`. Callbacks always redirect back to the validated receiver — on
+// failure with #error=oauth_failed instead of tokens.
+
+/** Custom callback so failures also return to the state-validated receiver. */
+const handleOAuthResult = (strategy) => (req, res, next) => {
+  passport.authenticate(strategy, { session: false }, (err, user) => {
+    req.user = user || null;
+    if (err) {
+      req.user = null;
+    }
+    oauthCallback(req, res);
+  })(req, res, next);
+};
 
 /**
  * @route   GET /api/auth/google
@@ -165,7 +180,8 @@ router.post('/resend-verification', verifyToken, authController.resendVerificati
 router.get('/google', (req, res, next) => {
   passport.authenticate('google', {
     scope: ['profile', 'email'],
-    session: false
+    session: false,
+    state: buildOAuthState(req)
   })(req, res, next);
 });
 
@@ -174,10 +190,7 @@ router.get('/google', (req, res, next) => {
  * @desc    Google OAuth callback
  * @access  Public
  */
-router.get('/google/callback',
-  passport.authenticate('google', { session: false, failureRedirect: '/auth/login?error=oauth_failed' }),
-  oauthCallback
-);
+router.get('/google/callback', handleOAuthResult('google'));
 
 /**
  * @route   GET /api/auth/github
@@ -187,7 +200,8 @@ router.get('/google/callback',
 router.get('/github', (req, res, next) => {
   passport.authenticate('github', {
     scope: ['user:email'],
-    session: false
+    session: false,
+    state: buildOAuthState(req)
   })(req, res, next);
 });
 
@@ -196,9 +210,6 @@ router.get('/github', (req, res, next) => {
  * @desc    GitHub OAuth callback
  * @access  Public
  */
-router.get('/github/callback',
-  passport.authenticate('github', { session: false, failureRedirect: '/auth/login?error=oauth_failed' }),
-  oauthCallback
-);
+router.get('/github/callback', handleOAuthResult('github'));
 
 module.exports = router;

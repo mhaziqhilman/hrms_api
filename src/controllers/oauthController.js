@@ -1,12 +1,97 @@
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const jwtConfig = require('../config/jwt');
-const { User, Employee, Company, UserCompany } = require('../models');
+const { User } = require('../models');
 const logger = require('../utils/logger');
 
 /**
- * Generate JWT token (same pattern as authController)
+ * OAuth (Google / GitHub) for the whole Nextura suite.
+ *
+ * Any app in the suite can start a login with ?returnTo=<receiver URL>.
+ * The receiver must be on the exact-match allowlist below; it is carried
+ * through the provider round-trip inside an HMAC-signed `state` (10-min
+ * expiry), and re-validated on the way back. Tokens are handed to the
+ * receiver in the URL *fragment* (#token=…) so they never reach server
+ * logs, and the receiver is expected to call GET /auth/me for the profile
+ * instead of trusting user data in the URL.
  */
+
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:4200';
+
+/** Default receiver — the HR app's OAuth callback route (legacy behaviour). */
+const DEFAULT_RECEIVER = `${FRONTEND_URL}/auth/oauth-callback`;
+
+/** Exact-match allowlist of OAuth receiver URLs across the suite. */
+const ALLOWED_RECEIVERS = new Set([
+  'https://nextura.my/auth/callback/',
+  'https://www.nextura.my/auth/callback/',
+  'https://hr.nextura.my/auth/oauth-callback',
+  `${FRONTEND_URL}/auth/oauth-callback`,
+  'http://localhost:5000/auth/callback/',   // Nextura Hub (local dev)
+  'http://localhost:4200/auth/oauth-callback', // Nextura HR (local dev)
+  ...(process.env.OAUTH_RETURN_URLS
+    ? process.env.OAUTH_RETURN_URLS.split(',').map(u => u.trim()).filter(Boolean)
+    : [])
+]);
+
+const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+const b64url = (buf) => Buffer.from(buf).toString('base64url');
+const stateSig = (payload) =>
+  crypto.createHmac('sha256', jwtConfig.secret).update(payload).digest('base64url');
+
+/** Validate a returnTo value against the receiver allowlist. */
+const resolveReceiver = (returnTo) => {
+  if (typeof returnTo === 'string' && ALLOWED_RECEIVERS.has(returnTo)) return returnTo;
+  return null;
+};
+
+/** In-app path the receiver should continue to. Reject absolute/protocol-relative URLs. */
+const sanitizeNextPath = (next) => {
+  if (typeof next === 'string' && /^\/(?!\/)/.test(next) && next.length <= 512) return next;
+  return null;
+};
+
+/**
+ * Build the signed state for an OAuth round-trip.
+ * Carries the validated receiver URL and an optional in-app next path.
+ */
+const buildOAuthState = (req) => {
+  const receiver = resolveReceiver(req.query.returnTo) || DEFAULT_RECEIVER;
+  // Legacy HR param (?returnUrl=/leave/apply) — an in-app path, not a receiver
+  const next = sanitizeNextPath(req.query.next || req.query.returnUrl);
+  const payload = b64url(JSON.stringify({
+    r: receiver,
+    n: next,
+    exp: Date.now() + STATE_TTL_MS,
+    z: crypto.randomBytes(8).toString('hex')
+  }));
+  return `${payload}.${stateSig(payload)}`;
+};
+
+/** Verify + decode state. Returns { receiver, next } — falls back to defaults on any problem. */
+const readOAuthState = (state) => {
+  const fallback = { receiver: DEFAULT_RECEIVER, next: null };
+  if (typeof state !== 'string') return fallback;
+  const dot = state.lastIndexOf('.');
+  if (dot < 1) return fallback;
+  const payload = state.slice(0, dot);
+  const sig = state.slice(dot + 1);
+  const expected = stateSig(payload);
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return fallback;
+  try {
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!data.exp || Date.now() > data.exp) return fallback;
+    const receiver = resolveReceiver(data.r) || DEFAULT_RECEIVER;
+    return { receiver, next: sanitizeNextPath(data.n) };
+  } catch (e) {
+    return fallback;
+  }
+};
+
+/** Generate JWT token (same pattern as authController) */
 const generateToken = (user) => {
   return jwt.sign(
     {
@@ -38,76 +123,35 @@ const generateAndSaveRefreshToken = async (user) => {
 };
 
 /**
- * Handle OAuth callback success — generates JWT and redirects to frontend
+ * Handle OAuth callback — issues tokens and hands them to the receiver
+ * in the URL fragment. The receiver validates via GET /auth/me.
  */
 const oauthCallback = async (req, res) => {
+  const { receiver, next } = readOAuthState(req.query.state);
+
   try {
     const user = req.user;
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
 
     if (!user) {
-      return res.redirect(`${frontendUrl}/auth/login?error=oauth_failed`);
+      return res.redirect(`${receiver}#error=oauth_failed`);
     }
 
-    // Reload user with associations for the response
-    const fullUser = await User.findByPk(user.id, {
-      include: [
-        {
-          model: Employee,
-          as: 'employee',
-          attributes: ['id', 'full_name', 'employee_id', 'department', 'position'],
-          required: false
-        },
-        {
-          model: Company,
-          as: 'company',
-          attributes: ['id', 'name', 'registration_no', 'logo_url'],
-          required: false
-        }
-      ],
-      attributes: { exclude: ['password', 'email_verification_token', 'email_verification_expires', 'oauth_provider_id'] }
-    });
-
-    // Fetch company memberships
-    const companyMemberships = await UserCompany.findAll({
-      where: { user_id: user.id },
-      include: [{
-        model: Company,
-        as: 'company',
-        attributes: ['id', 'name', 'registration_no', 'logo_url']
-      }],
-      order: [['joined_at', 'ASC']]
-    });
-
+    const fullUser = await User.findByPk(user.id);
     const token = generateToken(fullUser);
     const refreshToken = await generateAndSaveRefreshToken(fullUser);
 
-    // Build user object for frontend
-    const userData = {
-      id: fullUser.id,
-      email: fullUser.email,
-      role: fullUser.role,
-      email_verified: fullUser.email_verified,
-      company_id: fullUser.company_id,
-      employee: fullUser.employee,
-      company: fullUser.company,
-      company_memberships: companyMemberships,
-      oauth_provider: fullUser.oauth_provider,
-      avatar_url: fullUser.avatar_url
-    };
+    logger.info(`OAuth login successful for ${fullUser.email}, redirecting to receiver`);
 
-    const encodedUser = encodeURIComponent(JSON.stringify(userData));
-    const encodedToken = encodeURIComponent(token);
-    const encodedRefreshToken = encodeURIComponent(refreshToken);
+    const fragment =
+      `#token=${encodeURIComponent(token)}` +
+      `&refresh=${encodeURIComponent(refreshToken)}` +
+      (next ? `&next=${encodeURIComponent(next)}` : '');
 
-    logger.info(`OAuth login successful for ${fullUser.email}, redirecting to frontend`);
-
-    res.redirect(`${frontendUrl}/auth/oauth-callback?token=${encodedToken}&refreshToken=${encodedRefreshToken}&user=${encodedUser}`);
+    res.redirect(`${receiver}${fragment}`);
   } catch (error) {
     logger.error(`OAuth callback error: ${error.message}`);
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:4200';
-    res.redirect(`${frontendUrl}/auth/login?error=oauth_failed`);
+    res.redirect(`${receiver}#error=oauth_failed`);
   }
 };
 
-module.exports = { oauthCallback };
+module.exports = { oauthCallback, buildOAuthState, readOAuthState };

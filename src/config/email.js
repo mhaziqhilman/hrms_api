@@ -7,7 +7,8 @@ module.exports = {
   secure: process.env.EMAIL_SECURE === 'true',
   auth: {
     user: process.env.EMAIL_USER || '',
-    pass: process.env.EMAIL_PASSWORD || ''
+    // Gmail app passwords are shown as "xxxx xxxx xxxx xxxx" — strip whitespace from pasted values
+    pass: (process.env.EMAIL_PASSWORD || '').replace(/\s+/g, '')
   },
   from: {
     name: process.env.EMAIL_FROM_NAME || 'HRMS System',

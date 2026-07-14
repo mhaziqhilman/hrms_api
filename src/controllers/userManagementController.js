@@ -1,6 +1,7 @@
 const userManagementService = require('../services/userManagementService');
 const { User } = require('../models');
 const logger = require('../utils/logger');
+const auditService = require('../services/auditService');
 
 /**
  * GET /api/users
@@ -196,6 +197,49 @@ const unlinkUserFromEmployee = async (req, res) => {
 };
 
 /**
+ * DELETE /api/users/:id/company-membership
+ * Remove a user from the admin's active company (offboarding).
+ * Scoping: the service only removes memberships of the active company,
+ * so an admin can only affect users who belong to their own company.
+ */
+const removeUserFromCompany = async (req, res) => {
+  try {
+    const companyId = req.user.company_id;
+    if (!companyId) {
+      return res.status(400).json({ success: false, message: 'No active company context' });
+    }
+    if (Number(req.params.id) === req.user.id) {
+      return res.status(400).json({ success: false, message: 'You cannot remove yourself from the company' });
+    }
+
+    const user = await userManagementService.removeUserFromCompany(req.params.id, companyId);
+
+    auditService.log({
+      userId: req.user.id,
+      companyId,
+      action: 'user.removed_from_company',
+      entityType: 'User',
+      entityId: req.params.id,
+      newValues: { removed_from_company_id: companyId },
+      req
+    });
+
+    res.json({
+      success: true,
+      message: 'User removed from company successfully',
+      data: user
+    });
+  } catch (error) {
+    logger.error('Error removing user from company:', error);
+    const status = error.message.includes('not found') ? 404 : 400;
+    res.status(status).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/**
  * GET /api/users/unlinked-employees
  * Get employees without a user account
  */
@@ -257,6 +301,7 @@ module.exports = {
   toggleUserActive,
   linkUserToEmployee,
   unlinkUserFromEmployee,
+  removeUserFromCompany,
   getUnlinkedEmployees,
   resetUserPassword
 };

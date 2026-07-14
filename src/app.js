@@ -51,6 +51,7 @@ const cashFlowRoutes = require('./routes/cashflow.routes');
 const packageRoutes = require('./routes/package.routes');
 const subscriptionRoutes = require('./routes/subscription.routes');
 const adminSubscriptionRoutes = require('./routes/adminSubscription.routes');
+const overtimeRoutes = require('./routes/overtime.routes');
 
 // Initialize express app
 const app = express();
@@ -112,10 +113,18 @@ app.use((req, res, next) => {
   next();
 });
 
-// CORS configuration
+// CORS configuration — Nextura suite domains (hub + product apps) plus dev origins.
+// FRONTEND_URLS (comma-separated) can extend the list without a code change.
 const allowedOrigins = [
+  'https://nextura.my',
+  'https://www.nextura.my',
+  'https://hr.nextura.my',
+  'https://pm.nextura.my',
   process.env.FRONTEND_URL || 'http://localhost:4200',
+  ...(process.env.FRONTEND_URLS ? process.env.FRONTEND_URLS.split(',').map(o => o.trim()) : []),
   'http://localhost:4200',
+  'http://localhost:5000',   // Nextura Hub (local dev)
+  'http://localhost:3001',   // Nextura PM (local dev)
   'https://localhost',
   'http://localhost',
   'capacitor://localhost',
@@ -197,6 +206,7 @@ app.use('/api/payruns', verifyToken, requireFeature('payroll'), payRunRoutes);
 app.use('/api/leaves', leaveRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/claims', verifyToken, requireFeature('claims'), claimRoutes);
+app.use('/api/overtime', verifyToken, requireFeature('overtime'), overtimeRoutes);
 app.use('/api/claim-types', claimTypeRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/memos', memoRoutes);
@@ -260,6 +270,10 @@ const startServer = async () => {
     // Start background jobs (subscription trial/period maintenance)
     const { startSubscriptionJobs } = require('./jobs/subscriptionJobs');
     startSubscriptionJobs();
+
+    // Auto clock-out sessions where the employee forgot to clock out
+    const { startAttendanceJobs } = require('./jobs/attendanceJobs');
+    startAttendanceJobs();
 
     // Start server
     app.listen(PORT, () => {

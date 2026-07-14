@@ -9,6 +9,7 @@ const { linkEmployeeToUser } = require('../services/invitationService');
 const logger = require('../utils/logger');
 const tokenBlacklist = require('../utils/tokenBlacklist');
 const subscriptionService = require('../services/subscriptionService');
+const { checkCompanyAccess, findUsableMembership, isEmployeeOffboarded, OFFBOARD_MESSAGES } = require('../utils/employmentAccess');
 
 /**
  * Generate JWT access token (short-lived)
@@ -260,12 +261,9 @@ const login = async (req, res, next) => {
           ]
         });
       } else {
-        // Auto-repair: user has no company_id but may have existing memberships
-        const existingMembership = await UserCompany.findOne({
-          where: { user_id: user.id },
-          include: [{ model: Company, as: 'company', attributes: ['id', 'name', 'registration_no', 'logo_url'] }],
-          order: [['joined_at', 'ASC']]
-        });
+        // Auto-repair: user has no company_id but may have existing memberships.
+        // Only restore a membership the user can still use (not offboarded).
+        const existingMembership = await findUsableMembership(user.id, { email: user.email });
 
         if (existingMembership) {
           user.company_id = existingMembership.company_id;
@@ -291,6 +289,50 @@ const login = async (req, res, next) => {
           });
 
           logger.info(`Auto-repaired company_id for ${user.email} from membership → company ${existingMembership.company_id}`);
+        }
+      }
+    }
+
+    // Enforce company access: an offboarded (Resigned/Terminated past last
+    // working day) or removed member cannot log into that company. If they
+    // still belong to another company, switch them there instead of blocking.
+    if (user.role !== 'super_admin' && user.company_id) {
+      const access = await checkCompanyAccess(user.id, user.company_id, { role: user.role, email: user.email });
+
+      if (!access.allowed) {
+        const fallback = await findUsableMembership(user.id, { excludeCompanyId: user.company_id, email: user.email });
+
+        if (fallback) {
+          user.company_id = fallback.company_id;
+          user.role = fallback.role;
+          await user.save();
+
+          await user.reload({
+            include: [
+              {
+                model: Employee,
+                as: 'employee',
+                attributes: ['id', 'full_name', 'employee_id', 'department', 'position'],
+                where: { company_id: fallback.company_id },
+                required: false
+              },
+              {
+                model: Company,
+                as: 'company',
+                attributes: ['id', 'name', 'registration_no', 'logo_url'],
+                required: false
+              }
+            ]
+          });
+
+          logger.info(`Login for ${email}: switched active company to ${fallback.company_id} (${access.code} on previous company)`);
+        } else {
+          logger.warn(`Login blocked for ${email}: ${access.code}`);
+          return res.status(403).json({
+            success: false,
+            code: access.code,
+            message: OFFBOARD_MESSAGES[access.code]
+          });
         }
       }
     }
@@ -324,6 +366,8 @@ const login = async (req, res, next) => {
           role: user.role,
           email_verified: user.email_verified,
           company_id: user.company_id,
+          avatar_url: user.avatar_url,
+          oauth_provider: user.oauth_provider,
           employee: user.employee,
           company: user.company,
           company_memberships: companyMemberships
@@ -395,25 +439,29 @@ const getCurrentUser = async (req, res, next) => {
       }
     }
 
-    // Auto-repair: if user has no company_id but has company memberships, restore it
+    // Auto-repair: if user has no company_id but has company memberships, restore it.
+    // Only restore a membership the user can still use — never one where their
+    // employment has ended (that would resurrect revoked access).
     if (!user.company_id && user.role !== 'super_admin' && user.company_memberships && user.company_memberships.length > 0) {
-      const firstMembership = user.company_memberships[0];
-      await User.update(
-        { company_id: firstMembership.company_id, role: firstMembership.role },
-        { where: { id: user.id } }
-      );
-      user.dataValues.company_id = firstMembership.company_id;
-      user.dataValues.role = firstMembership.role;
-      user.dataValues.company = firstMembership.company;
-      // Load the correct employee for the restored company
-      const restoredEmployee = await Employee.findOne({
-        where: { user_id: user.id, company_id: firstMembership.company_id },
-        attributes: { exclude: ['created_at', 'updated_at', 'deleted_at'] }
-      });
-      if (restoredEmployee) {
-        user.dataValues.employee = restoredEmployee;
+      const usableMembership = await findUsableMembership(user.id, { email: user.email });
+      if (usableMembership) {
+        await User.update(
+          { company_id: usableMembership.company_id, role: usableMembership.role },
+          { where: { id: user.id } }
+        );
+        user.dataValues.company_id = usableMembership.company_id;
+        user.dataValues.role = usableMembership.role;
+        user.dataValues.company = usableMembership.company;
+        // Load the correct employee for the restored company
+        const restoredEmployee = await Employee.findOne({
+          where: { user_id: user.id, company_id: usableMembership.company_id },
+          attributes: { exclude: ['created_at', 'updated_at', 'deleted_at'] }
+        });
+        if (restoredEmployee) {
+          user.dataValues.employee = restoredEmployee;
+        }
+        logger.info(`Auto-repaired company_id for user ${user.email} → company ${usableMembership.company_id}`);
       }
-      logger.info(`Auto-repaired company_id for user ${user.email} → company ${firstMembership.company_id}`);
     }
 
     // Add computed field for frontend to know if user has a password (before toJSON strips it)
@@ -470,12 +518,20 @@ const forgotPassword = async (req, res, next) => {
 
     await user.save();
 
-    // Send email
-    await sendPasswordResetEmail(
-      email,
-      resetToken,
-      user.employee?.full_name || 'User'
-    );
+    // Send email — never leak SMTP/provider errors to an unauthenticated caller
+    try {
+      await sendPasswordResetEmail(
+        email,
+        resetToken,
+        user.employee?.full_name || 'User'
+      );
+    } catch (mailError) {
+      logger.error(`Password reset email failed for ${email}: ${mailError.message}`);
+      return res.status(502).json({
+        success: false,
+        message: 'We could not send the reset email right now. Please try again later.'
+      });
+    }
 
     logger.info(`Password reset requested for: ${email}`);
 

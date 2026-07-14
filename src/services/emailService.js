@@ -179,7 +179,10 @@ const sendEmail = async (options) => {
  * Send password reset email
  */
 const sendPasswordResetEmail = async (email, resetToken, userName, companyId) => {
-  const resetUrl = `${process.env.FRONTEND_URL}/auth/reset-password?token=${resetToken}`;
+  // Password reset lives on the Nextura hub (one identity); fall back to the HR app if HUB_URL is unset.
+  const resetUrl = process.env.HUB_URL
+    ? `${process.env.HUB_URL}/reset-password/?token=${resetToken}`
+    : `${process.env.FRONTEND_URL}/auth/reset-password?token=${resetToken}`;
 
   const dbTemplate = await getTemplate(companyId, 'password_reset');
   if (dbTemplate) {

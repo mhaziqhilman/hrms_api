@@ -1,5 +1,6 @@
 const { Op } = require('sequelize');
-const { User, Employee, Company } = require('../models');
+const { User, Employee, Company, UserCompany } = require('../models');
+const { findUsableMembership } = require('../utils/employmentAccess');
 
 /**
  * Get all users with pagination, search, and filtering
@@ -167,6 +168,53 @@ const unlinkUserFromEmployee = async (userId) => {
 };
 
 /**
+ * Remove a user from a company entirely (offboarding).
+ * Deletes the membership, detaches any employee profile in that company,
+ * moves the user's active company to another usable membership (or none),
+ * and revokes their refresh token so silent re-auth stops immediately.
+ * Unlike unlinkUserFromEmployee, this severs company access itself.
+ */
+const removeUserFromCompany = async (userId, companyId) => {
+  const user = await User.findByPk(userId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+  if (user.role === 'super_admin') {
+    throw new Error('Super admin accounts cannot be removed from a company');
+  }
+
+  const membership = await UserCompany.findOne({
+    where: { user_id: userId, company_id: companyId }
+  });
+  const employee = await Employee.findOne({
+    where: { user_id: userId, company_id: companyId }
+  });
+
+  if (!membership && !employee) {
+    throw new Error('User is not a member of this company');
+  }
+
+  if (membership) {
+    await membership.destroy();
+  }
+  if (employee) {
+    await employee.update({ user_id: null });
+  }
+
+  const updates = { refresh_token: null, refresh_token_expires_at: null };
+  if (user.company_id === Number(companyId)) {
+    const fallback = await findUsableMembership(userId, { excludeCompanyId: Number(companyId), email: user.email });
+    updates.company_id = fallback ? fallback.company_id : null;
+    if (fallback) {
+      updates.role = fallback.role;
+    }
+  }
+  await user.update(updates);
+
+  return await getUserById(userId);
+};
+
+/**
  * Get unlinked employees (employees without a user account)
  */
 const getUnlinkedEmployees = async (companyId) => {
@@ -207,6 +255,7 @@ module.exports = {
   toggleUserActive,
   linkUserToEmployee,
   unlinkUserFromEmployee,
+  removeUserFromCompany,
   getUnlinkedEmployees,
   resetUserPassword
 };
